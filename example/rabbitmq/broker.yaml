@@ -1,0 +1,10 @@
+broker:
+  type: rabbitmq
+  rabbitmq:
+    url: amqp://guest:guest@rabbitmq:5672/
+    exchange_type: topic
+
+subscriber:
+  parallelism: 10
+
+

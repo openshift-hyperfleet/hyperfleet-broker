@@ -1,0 +1,64 @@
+services:
+  rabbitmq:
+    image: rabbitmq:3
+    container_name: rabbitmq-example-rabbitmq
+    ports:
+      - "5672:5672"   # AMQP port
+      - "15672:15672" # Management UI port
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  publisher:
+    build:
+      context: ../..
+      dockerfile: example/Dockerfile
+    container_name: rabbitmq-example-publisher
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - ./broker.yaml:/app/broker.yaml:ro
+    command: ["./publisher"]
+    restart: unless-stopped
+
+  subscriber1:
+    build:
+      context: ../..
+      dockerfile: example/Dockerfile
+    container_name: rabbitmq-example-subscriber1
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      SUBSCRIBER_INSTANCE_ID: "1"
+    volumes:
+      - ./broker.yaml:/app/broker.yaml:ro
+    command: ["./subscriber"]
+    restart: unless-stopped
+
+  subscriber2:
+    build:
+      context: ../..
+      dockerfile: example/Dockerfile
+    container_name: rabbitmq-example-subscriber2
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      SUBSCRIBER_INSTANCE_ID: "2"
+    volumes:
+      - ./broker.yaml:/app/broker.yaml:ro
+    command: ["./subscriber"]
+    restart: unless-stopped
+
+volumes:
+  rabbitmq_data:
+
