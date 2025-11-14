@@ -11,6 +11,7 @@ import (
 
 // config holds the broker configuration
 type config struct {
+	LogConfig  bool             `mapstructure:"log_config"`
 	Broker     brokerConfig     `mapstructure:"broker"`
 	Subscriber subscriberConfig `mapstructure:"subscriber"`
 }
@@ -87,6 +88,7 @@ func loadConfig() (*config, error) {
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
 	// Set defaults
+	v.SetDefault("log_config", false)
 	v.SetDefault("subscriber.parallelism", 10)
 
 	// Read config file (optional - will use defaults if not found)
@@ -120,6 +122,7 @@ func buildConfigFromMap(configMap map[string]string) (*config, error) {
 	v.SetConfigType("yaml")
 
 	// Set defaults
+	v.SetDefault("log_config", false)
 	v.SetDefault("subscriber.parallelism", 1)
 
 	// Set values from the map

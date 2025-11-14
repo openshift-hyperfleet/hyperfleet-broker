@@ -6,7 +6,7 @@ test-unit:
 
 # Run tests in the test folder
 test-integration:
-	go test -v ./test/integration...
+	go test -v ./test/integration/...
 
 # Run all tests
 test-all: test-unit test-integration

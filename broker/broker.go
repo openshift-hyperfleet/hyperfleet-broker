@@ -3,7 +3,6 @@ package broker
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
@@ -39,10 +38,12 @@ func NewPublisher(configMap ...map[string]string) (Publisher, error) {
 		}
 	}
 
-	// Log configuration before creating publisher
-	//logConfiguration(cfg, "Publisher")
-
 	logger := watermill.NewStdLogger(false, false)
+
+	// Log configuration before creating publisher if enabled
+	if cfg.LogConfig {
+		logConfiguration(cfg, "Publisher", logger)
+	}
 
 	var pub message.Publisher
 	var err error
@@ -90,10 +91,12 @@ func NewSubscriber(subscriptionId string, configMap ...map[string]string) (Subsc
 		}
 	}
 
-	// Log configuration before creating subscriber
-	//logConfiguration(cfg, "Subscriber")
-
 	logger := watermill.NewStdLogger(false, false)
+
+	// Log configuration before creating subscriber if enabled
+	if cfg.LogConfig {
+		logConfiguration(cfg, "Subscriber", logger)
+	}
 
 	var sub message.Subscriber
 	var err error
@@ -121,6 +124,7 @@ func NewSubscriber(subscriptionId string, configMap ...map[string]string) (Subsc
 		sub:            sub,
 		parallelism:    parallelism,
 		subscriptionID: subscriptionId,
+		logger:         logger,
 	}, nil
 }
 
@@ -245,7 +249,7 @@ func newGooglePubSubSubscriber(cfg *config, logger watermill.LoggerAdapter, subs
 }
 
 // logConfiguration logs the complete configuration object as JSON
-func logConfiguration(cfg *config, component string) {
+func logConfiguration(cfg *config, component string, logger watermill.LoggerAdapter) {
 	// Create a copy of config with masked password for logging
 	logCfg := *cfg
 	if cfg.Broker.Type == "rabbitmq" && cfg.Broker.RabbitMQ.URL != "" {
@@ -255,14 +259,14 @@ func logConfiguration(cfg *config, component string) {
 	// Marshal to JSON with indentation
 	jsonBytes, err := json.MarshalIndent(logCfg, "", "  ")
 	if err != nil {
-		log.Printf("Error marshaling %s configuration to JSON: %v", component, err)
+		logger.Error(fmt.Sprintf("Error marshaling %s configuration to JSON", component), err, nil)
 		// Fallback to simple logging
-		log.Printf("=== %s Configuration ===", component)
-		log.Printf("Broker Type: %s", cfg.Broker.Type)
+		logger.Info(fmt.Sprintf("=== %s Configuration ===", component), nil)
+		logger.Info(fmt.Sprintf("Broker Type: %s", cfg.Broker.Type), nil)
 		return
 	}
 
-	log.Printf("=== %s Configuration (JSON) ===\n%s\n========================================", component, string(jsonBytes))
+	logger.Info(fmt.Sprintf("=== %s Configuration (JSON) ===\n%s\n========================================", component, string(jsonBytes)), nil)
 }
 
 // maskPassword masks passwords in URLs for logging

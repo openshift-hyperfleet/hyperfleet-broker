@@ -3,9 +3,9 @@ package broker
 import (
 	"context"
 	"fmt"
-	"log"
 	"sync"
 
+	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill/message"
 	"github.com/cloudevents/sdk-go/v2/event"
 	cloudeventsutil "github.com/openshift-hyperfleet/hyperfleet-broker/cloudevents"
@@ -27,6 +27,7 @@ type subscriber struct {
 	sub            message.Subscriber
 	parallelism    int
 	subscriptionID string
+	logger         watermill.LoggerAdapter
 }
 
 // Subscribe subscribes to a topic and processes messages with the provided handler
@@ -102,14 +103,18 @@ func (s *subscriber) worker(ctx context.Context, messages <-chan *message.Messag
 			// Convert Watermill message to CloudEvent
 			evt, err := cloudeventsutil.MessageToEvent(msg)
 			if err != nil {
-				log.Printf("Error converting message to CloudEvent: %v", err)
+				s.logger.Error("Error converting message to CloudEvent", err, watermill.LogFields{
+					"uuid":            msg.UUID,
+					"subscription_id": s.subscriptionID,
+					"message":         msg.Payload,
+					"metadata":        msg.Metadata,
+				})
 				msg.Nack()
 				continue
 			}
 
 			// Process the event with the handler
 			if err := handler(ctx, evt); err != nil {
-				log.Printf("Error processing event: %v", err)
 				msg.Nack()
 				continue
 			}
