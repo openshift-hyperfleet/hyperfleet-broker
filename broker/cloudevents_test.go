@@ -1,4 +1,4 @@
-package cloudevents
+package broker
 
 import (
 	"encoding/json"
@@ -136,7 +136,7 @@ func TestMessageToEvent(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			msg := tt.setupMsg()
-			evt, err := MessageToEvent(msg)
+			evt, err := messageToEvent(msg)
 			if tt.expectError {
 				assert.Error(t, err)
 				assert.Nil(t, evt)
@@ -292,7 +292,7 @@ func TestEventToMessage(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			evt := tt.setupEvent()
-			msg, err := EventToMessage(evt)
+			msg, err := eventToMessage(evt)
 			if tt.expectError {
 				assert.Error(t, err)
 				assert.Nil(t, msg)
@@ -321,12 +321,12 @@ func TestRoundTripConversion(t *testing.T) {
 	originalEvt.SetData(cloudevents.ApplicationJSON, map[string]string{"key": "value"})
 
 	// Convert to message
-	msg, err := EventToMessage(&originalEvt)
+	msg, err := eventToMessage(&originalEvt)
 	require.NoError(t, err)
 	require.NotNil(t, msg)
 
 	// Convert back to event
-	convertedEvt, err := MessageToEvent(msg)
+	convertedEvt, err := messageToEvent(msg)
 	require.NoError(t, err)
 	require.NotNil(t, convertedEvt)
 

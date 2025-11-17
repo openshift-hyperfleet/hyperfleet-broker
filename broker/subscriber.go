@@ -8,7 +8,6 @@ import (
 	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill/message"
 	"github.com/cloudevents/sdk-go/v2/event"
-	cloudeventsutil "github.com/openshift-hyperfleet/hyperfleet-broker/cloudevents"
 )
 
 // HandlerFunc is a function that handles a CloudEvent
@@ -100,7 +99,7 @@ func (s *subscriber) worker(ctx context.Context, messages <-chan *message.Messag
 			}
 
 			// Convert Watermill message to CloudEvent
-			evt, err := cloudeventsutil.MessageToEvent(msg)
+			evt, err := messageToEvent(msg)
 			if err != nil {
 				s.logger.Error("Error converting message to CloudEvent", err, watermill.LogFields{
 					"uuid":            msg.UUID,

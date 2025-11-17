@@ -262,6 +262,39 @@ subscriber:
 				assert.Equal(t, 20, cfg.Subscriber.Parallelism)
 			},
 		},
+		{
+			name: "rabbitmq url environment variable override",
+			setup: func(t *testing.T) string {
+				tmpDir := t.TempDir()
+				configPath := filepath.Join(tmpDir, "broker.yaml")
+				configContent := `
+broker:
+  type: rabbitmq
+  rabbitmq:
+    url: amqp://guest:guest@localhost:5672/
+    exchange: test-exchange
+subscriber:
+  parallelism: 5
+`
+				err := os.WriteFile(configPath, []byte(configContent), 0644)
+				require.NoError(t, err)
+				os.Setenv("BROKER_CONFIG_FILE", configPath)
+				os.Setenv("BROKER_RABBITMQ_URL", "amqp://user:pass@override-host:5673/vhost")
+				return configPath
+			},
+			cleanup: func(t *testing.T, path string) {
+				os.Unsetenv("BROKER_CONFIG_FILE")
+				os.Unsetenv("BROKER_RABBITMQ_URL")
+			},
+			expectError: false,
+			validate: func(t *testing.T, cfg *config) {
+				// Environment variable should override config file
+				assert.Equal(t, "amqp://user:pass@override-host:5673/vhost", cfg.Broker.RabbitMQ.URL)
+				// Other values from file should still be present
+				assert.Equal(t, "test-exchange", cfg.Broker.RabbitMQ.Exchange)
+				assert.Equal(t, 5, cfg.Subscriber.Parallelism)
+			},
+		},
 	}
 
 	for _, tt := range tests {

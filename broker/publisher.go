@@ -3,7 +3,6 @@ package broker
 import (
 	"github.com/ThreeDotsLabs/watermill/message"
 	"github.com/cloudevents/sdk-go/v2/event"
-	cloudeventsutil "github.com/openshift-hyperfleet/hyperfleet-broker/cloudevents"
 )
 
 // Publisher defines the interface for publishing CloudEvents
@@ -22,7 +21,7 @@ type publisher struct {
 // Publish publishes a CloudEvent to the specified topic
 func (p *publisher) Publish(topic string, event *event.Event) error {
 	// Convert CloudEvent to Watermill message
-	msg, err := cloudeventsutil.EventToMessage(event)
+	msg, err := eventToMessage(event)
 	if err != nil {
 		return err
 	}
