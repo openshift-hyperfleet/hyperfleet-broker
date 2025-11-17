@@ -89,7 +89,16 @@ func (s *subscriber) Subscribe(ctx context.Context, topic string, handler Handle
 
 // worker processes messages from the message channel
 func (s *subscriber) worker(ctx context.Context, messages <-chan *message.Message, handler HandlerFunc) {
-	for {
+	defer func() {
+          if r := recover(); r != nil {
+              s.logger.Error("Worker panicked - recovered",
+  fmt.Errorf("panic: %v", r), watermill.LogFields{
+                  "subscription_id": s.subscriptionID,
+                  "topic":           topic,
+                  "stack":           string(debug.Stack()),
+              })
+          }
+      }()
 		select {
 		case <-ctx.Done():
 			return
