@@ -206,8 +206,7 @@ func testPublisherSubscriber(t *testing.T, cfg brokerTestConfig) {
 	// Give subscriber time to set up
 	time.Sleep(cfg.setupSleep)
 
-	// Publish event
-	err = pub.Publish(ctx, "test-topic", &evt)
+	err = pub.Publish("test-topic", &evt)
 	require.NoError(t, err)
 
 	// Wait for event to be received
@@ -279,10 +278,10 @@ func testMultipleEvents(t *testing.T, cfg brokerTestConfig) {
 	time.Sleep(cfg.setupSleep)
 
 	// Publish both events
-	err = pub.Publish(ctx, "routing-topic", &evt1)
+	err = pub.Publish("routing-topic", &evt1)
 	require.NoError(t, err)
 
-	err = pub.Publish(ctx, "routing-topic", &evt2)
+	err = pub.Publish("routing-topic", &evt2)
 	require.NoError(t, err)
 
 	// Verify both events were received
@@ -371,7 +370,7 @@ func testSharedSubscription(t *testing.T, cfg brokerTestConfig) {
 		evt.SetID(fmt.Sprintf("id-%d", i))
 		evt.SetData(event.ApplicationJSON, map[string]int{"index": i})
 
-		err = pub.Publish(ctx, "shared-topic", &evt)
+		err = pub.Publish("shared-topic", &evt)
 		require.NoError(t, err)
 	}
 
@@ -477,7 +476,7 @@ func testFanoutSubscription(t *testing.T, cfg brokerTestConfig) {
 		messageIDs[i] = evt.ID()
 		evt.SetData(event.ApplicationJSON, map[string]int{"index": i})
 
-		err = pub.Publish(ctx, "fanout-topic", &evt)
+		err = pub.Publish("fanout-topic", &evt)
 		require.NoError(t, err)
 	}
 
@@ -582,7 +581,7 @@ func TestRabbitMQSubscriptionID(t *testing.T) {
 
 	time.Sleep(500 * time.Millisecond)
 
-	err = pub.Publish(ctx, "fanout-topic", &evt)
+	err = pub.Publish("fanout-topic", &evt)
 	require.NoError(t, err)
 
 	// Both should receive the event
@@ -649,7 +648,7 @@ func testSlowSubscriber(t *testing.T, configMap map[string]string, cfg brokerTes
 		evt.SetID(fmt.Sprintf("slow-id-%d", i))
 		evt.SetData(event.ApplicationJSON, map[string]int{"index": i})
 
-		err = pub.Publish(ctx, "slow-topic", &evt)
+		err = pub.Publish("slow-topic", &evt)
 		require.NoError(t, err)
 
 		// Add delay between publishes if configured (for gradual publishing)
@@ -798,7 +797,7 @@ func testErrorSubscriber(t *testing.T, cfg brokerTestConfig) {
 		evt.SetID(fmt.Sprintf("error-id-%d", i))
 		evt.SetData(event.ApplicationJSON, map[string]int{"index": i})
 
-		err = pub.Publish(ctx, "error-topic", &evt)
+		err = pub.Publish("error-topic", &evt)
 		require.NoError(t, err)
 	}
 
@@ -835,6 +834,119 @@ func TestRabbitMQErrorSubscriber(t *testing.T) {
 // TestGooglePubSubErrorSubscriber tests that messages are redistributed when one subscriber fails
 func TestGooglePubSubErrorSubscriber(t *testing.T) {
 	testErrorSubscriber(t, brokerTestConfig{
+		brokerType:     "googlepubsub",
+		setupSleep:     2 * time.Second,
+		receiveTimeout: 10 * time.Second,
+	})
+}
+
+// testCloseWaitsForInFlightMessages tests that Close() waits for in-flight message processing to complete
+func testCloseWaitsForInFlightMessages(t *testing.T, cfg brokerTestConfig) {
+	ctx := context.Background()
+	configMap := setupBrokerTest(t, cfg)
+	configMap["subscriber.parallelism"] = "6"
+
+	pub, err := broker.NewPublisher(configMap)
+	require.NoError(t, err)
+	defer pub.Close()
+
+	subscriptionId := "close-test-subscription"
+	sub, err := broker.NewSubscriber(subscriptionId, configMap)
+	require.NoError(t, err)
+
+	// Publish 5 messages
+	numMessages := 5
+
+	// Track processed messages
+	var processedCount int64
+	processingStarted := make(chan struct{})
+
+	// Handler that takes time to process (simulating in-flight work)
+	handler := func(ctx context.Context, e *event.Event) error {
+		// atomic.AddInt64 returns the new value after incrementing
+		// This gives us the sequence number of this message (1, 2, 3, etc.)
+		if atomic.AddInt64(&processedCount, 1) == 5 {
+			close(processingStarted) // Signal that processing has started
+		}
+		// Simulate work that takes time (200ms per message)
+		time.Sleep(3000 * time.Millisecond)
+
+		return nil
+	}
+
+	err = sub.Subscribe(ctx, "close-test-topic", handler)
+	require.NoError(t, err)
+
+	time.Sleep(cfg.setupSleep)
+	for i := 0; i < numMessages; i++ {
+		evt := event.New()
+		evt.SetType("com.example.test.event")
+		evt.SetSource("test-source")
+		evt.SetID(fmt.Sprintf("close-test-id-%d", i))
+		evt.SetData(event.ApplicationJSON, map[string]int{"index": i})
+
+		err = pub.Publish("close-test-topic", &evt)
+
+		require.NoError(t, err)
+	}
+
+	// Wait for processing to start (at least one message is being processed)
+	select {
+	case <-processingStarted:
+		// Processing has started, messages are now in-flight
+	case <-time.After(15 * time.Second):
+		t.Fatal("timeout waiting for processing to start")
+	}
+
+	// Record the time before Close()
+	closeStartTime := time.Now()
+
+	// Get count before Close() to verify messages are in-flight
+	countBeforeClose := atomic.LoadInt64(&processedCount)
+	assert.Greater(t, countBeforeClose, int64(0),
+		"at least one message should be in-flight when Close() is called")
+
+	// Close() should wait for all in-flight messages to complete
+	err = sub.Close()
+	closeDuration := time.Since(closeStartTime)
+	require.NoError(t, err)
+
+	// Verify that Close() took at least as long as processing one message (200ms)
+	// Since we have parallelism workers, multiple messages can be processed concurrently,
+	// but Close() should wait for all of them to complete
+	// With 5 messages at 200ms each and parallelism=1, it should take at least 1 second
+	// With parallelism > 1, it could be faster, but still should wait for all messages
+	minExpectedDuration := 200 * time.Millisecond
+	assert.GreaterOrEqual(t, closeDuration, minExpectedDuration,
+		"Close() should wait for in-flight messages to complete")
+
+	// Verify all messages were processed before Close() returned
+	finalCount := atomic.LoadInt64(&processedCount)
+	assert.Equal(t, int64(numMessages), finalCount,
+		"all messages should be processed before Close() returns")
+
+	// Wait a short time to verify no additional processing happens after Close()
+	// (proving that Close() actually waited for completion)
+	time.Sleep(100 * time.Millisecond)
+	countAfterWait := atomic.LoadInt64(&processedCount)
+	assert.Equal(t, finalCount, countAfterWait,
+		"no additional messages should be processed after Close() returns")
+
+	t.Logf("Close() took %v to complete, processed %d messages", closeDuration, finalCount)
+}
+
+// TestRabbitMQCloseWaitsForInFlightMessages tests that Close() waits for in-flight message processing
+func TestRabbitMQCloseWaitsForInFlightMessages(t *testing.T) {
+	testCloseWaitsForInFlightMessages(t, brokerTestConfig{
+		brokerType:     "rabbitmq",
+		setupSleep:     500 * time.Millisecond,
+		receiveTimeout: 5 * time.Second,
+	})
+}
+
+// TestGooglePubSubCloseWaitsForInFlightMessages tests that Close() waits for in-flight message processing
+func TestGooglePubSubCloseWaitsForInFlightMessages(t *testing.T) {
+	testCloseWaitsForInFlightMessages(t, brokerTestConfig{
 		brokerType:     "googlepubsub",
 		setupSleep:     2 * time.Second,
 		receiveTimeout: 10 * time.Second,

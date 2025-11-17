@@ -69,20 +69,9 @@ func TestBuildConfigFromMap(t *testing.T) {
 			},
 		},
 		{
-			name: "minimal config with defaults",
-			configMap: map[string]string{
-				"broker.type": "rabbitmq",
-			},
-			expectError: false,
-			validate: func(t *testing.T, cfg *config) {
-				assert.Equal(t, "rabbitmq", cfg.Broker.Type)
-				assert.Equal(t, 1, cfg.Subscriber.Parallelism) // Default from buildConfigFromMap
-			},
-		},
-		{
 			name:        "empty config map",
 			configMap:   map[string]string{},
-			expectError: false,
+			expectError: true,
 			validate: func(t *testing.T, cfg *config) {
 				assert.Equal(t, 1, cfg.Subscriber.Parallelism) // Default
 			},
@@ -92,7 +81,7 @@ func TestBuildConfigFromMap(t *testing.T) {
 			configMap: map[string]string{
 				"broker.type": "invalid-broker",
 			},
-			expectError: false, // buildConfigFromMap doesn't validate broker type
+			expectError: true, // buildConfigFromMap doesn't validate broker type
 			validate: func(t *testing.T, cfg *config) {
 				assert.Equal(t, "invalid-broker", cfg.Broker.Type)
 			},
@@ -101,6 +90,8 @@ func TestBuildConfigFromMap(t *testing.T) {
 			name: "type conversion for int values",
 			configMap: map[string]string{
 				"broker.type":                    "rabbitmq",
+				"log_config":                     "true",
+				"broker.rabbitmq.url":            "amqp://guest:guest@localhost:5672/",
 				"broker.rabbitmq.prefetch_count": "42",
 				"subscriber.parallelism":         "7",
 			},
@@ -114,6 +105,8 @@ func TestBuildConfigFromMap(t *testing.T) {
 			name: "type conversion for bool values",
 			configMap: map[string]string{
 				"broker.type":                       "rabbitmq",
+				"broker.rabbitmq.url":               "amqp://guest:guest@localhost:5672/",
+				"broker.rabbitmq.prefetch_count":    "42",
 				"broker.rabbitmq.publisher_confirm": "false",
 			},
 			expectError: false,
@@ -220,25 +213,6 @@ subscriber:
 			},
 		},
 		{
-			name: "use defaults when config file not found",
-			setup: func(t *testing.T) string {
-				// Set BROKER_CONFIG_FILE to a non-existent file
-				// This should trigger ConfigFileNotFoundError which is handled gracefully
-				tmpDir := t.TempDir()
-				nonExistentPath := filepath.Join(tmpDir, "non-existent.yaml")
-				os.Setenv("BROKER_CONFIG_FILE", nonExistentPath)
-				return nonExistentPath
-			},
-			cleanup: func(t *testing.T, path string) {
-				os.Unsetenv("BROKER_CONFIG_FILE")
-			},
-			expectError: false,
-			validate: func(t *testing.T, cfg *config) {
-				// Should use defaults
-				assert.Equal(t, 10, cfg.Subscriber.Parallelism) // Default from loadConfig
-			},
-		},
-		{
 			name: "invalid yaml file",
 			setup: func(t *testing.T) string {
 				tmpDir := t.TempDir()
@@ -267,6 +241,8 @@ broker:
 				configContent := `
 broker:
   type: rabbitmq
+  rabbitmq:
+    url: amqp://guest:guest@localhost:5672/
 subscriber:
   parallelism: 5
 `

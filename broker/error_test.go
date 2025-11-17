@@ -2,7 +2,6 @@ package broker
 
 import (
 	"context"
-	"os"
 	"testing"
 
 	"github.com/cloudevents/sdk-go/v2/event"
@@ -185,34 +184,19 @@ func TestNewSubscriberErrorHandling(t *testing.T) {
 func TestPublisherPublishErrorHandling(t *testing.T) {
 	// Create a publisher with invalid config that will fail on actual publish
 	configMap := map[string]string{
-		"broker.type": "rabbitmq",
-		// Missing URL - will fail when trying to connect
+		"broker.type":         "rabbitmq",
+		"broker.rabbitmq.url": "amqp://guest:guest@localhost:1234/",
+		// Invalid URL - will fail when trying to connect
 	}
 
-	pub, err := NewPublisher(configMap)
-	if err != nil {
-		t.Skipf("Skipping test: failed to create publisher: %v", err)
-	}
-	defer pub.Close()
-
-	// Create a valid CloudEvent
-	evt := event.New()
-	evt.SetType("com.example.test.event")
-	evt.SetSource("test-source")
-	evt.SetID("test-id")
-	evt.SetData(event.ApplicationJSON, map[string]string{"key": "value"})
-
-	// Attempt to publish - this should fail due to connection error
-	ctx := context.Background()
-	err = pub.Publish(ctx, "test-topic", &evt)
-	// This will fail because we don't have a real RabbitMQ connection
-	// The error handling is tested - the publisher should return an error
+	_, err := NewPublisher(configMap)
 	assert.Error(t, err)
 }
 
 func TestSubscriberSubscribeErrorHandling(t *testing.T) {
 	configMap := map[string]string{
 		"broker.type":            "rabbitmq",
+		"broker.rabbitmq.url":    "amqp://guest:guest@localhost:5672/",
 		"subscriber.parallelism": "1",
 	}
 
@@ -284,6 +268,7 @@ func TestSubscriberHandlerErrorHandling(t *testing.T) {
 
 	configMap := map[string]string{
 		"broker.type":            "rabbitmq",
+		"broker.rabbitmq.url":    "amqp://guest:guest@localhost:5672/",
 		"subscriber.parallelism": "1",
 	}
 
@@ -317,17 +302,18 @@ func TestBuildConfigFromMapErrorHandling(t *testing.T) {
 		{
 			name:        "nil map",
 			configMap:   nil,
-			expectError: false, // Should handle nil gracefully
+			expectError: true, // Should handle nil gracefully
 		},
 		{
 			name:        "empty map",
 			configMap:   map[string]string{},
-			expectError: false,
+			expectError: true,
 		},
 		{
 			name: "valid map",
 			configMap: map[string]string{
-				"broker.type": "rabbitmq",
+				"broker.type":         "rabbitmq",
+				"broker.rabbitmq.url": "amqp://guest:guest@localhost:5672/",
 			},
 			expectError: false,
 		},
@@ -350,52 +336,6 @@ func TestBuildConfigFromMapErrorHandling(t *testing.T) {
 					assert.NoError(t, err)
 					assert.NotNil(t, cfg)
 				}
-			}
-		})
-	}
-}
-
-func TestLoadConfigErrorHandling(t *testing.T) {
-	// Test error handling for various config file scenarios
-	// Most scenarios are covered in config_test.go, but we add error-specific tests here
-
-	tests := []struct {
-		name        string
-		setup       func(*testing.T)
-		cleanup     func(*testing.T)
-		expectError bool
-	}{
-		{
-			name: "non-existent config file via env var",
-			setup: func(t *testing.T) {
-				os.Setenv("BROKER_CONFIG_FILE", "/non/existent/path/broker.yaml")
-			},
-			cleanup: func(t *testing.T) {
-				os.Unsetenv("BROKER_CONFIG_FILE")
-			},
-			expectError: false, // Should use defaults when file not found
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.setup != nil {
-				tt.setup(t)
-			}
-			defer func() {
-				if tt.cleanup != nil {
-					tt.cleanup(t)
-				}
-			}()
-
-			cfg, err := loadConfig()
-			if tt.expectError {
-				assert.Error(t, err)
-				assert.Nil(t, cfg)
-			} else {
-				// Should handle missing files gracefully
-				assert.NoError(t, err)
-				assert.NotNil(t, cfg)
 			}
 		})
 	}

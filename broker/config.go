@@ -110,6 +110,11 @@ func loadConfig() (*config, error) {
 		return nil, fmt.Errorf("error unmarshaling config: %w", err)
 	}
 
+	// Validate configuration
+	if err := validateConfig(&cfg); err != nil {
+		return nil, fmt.Errorf("invalid configuration: %w", err)
+	}
+
 	return &cfg, nil
 }
 
@@ -140,5 +145,84 @@ func buildConfigFromMap(configMap map[string]string) (*config, error) {
 		return nil, fmt.Errorf("error unmarshaling config from map: %w", err)
 	}
 
+	// Validate configuration
+	if err := validateConfig(&cfg); err != nil {
+		return nil, fmt.Errorf("invalid configuration: %w", err)
+	}
+
 	return &cfg, nil
+}
+
+// validateConfig validates the configuration based on the broker type
+func validateConfig(cfg *config) error {
+	switch cfg.Broker.Type {
+	case "rabbitmq":
+		return validateRabbitMQConfig(cfg)
+	case "googlepubsub":
+		return validateGooglePubSubConfig(cfg)
+	default:
+		return fmt.Errorf("unsupported broker type: %s", cfg.Broker.Type)
+	}
+}
+
+// validateRabbitMQConfig validates RabbitMQ configuration
+func validateRabbitMQConfig(cfg *config) error {
+	rmq := cfg.Broker.RabbitMQ
+
+	// URL is required
+	if rmq.URL == "" {
+		return fmt.Errorf("rabbitmq.url is required")
+	}
+
+	// Validate URL format (should start with amqp:// or amqps://)
+	if !strings.HasPrefix(rmq.URL, "amqp://") && !strings.HasPrefix(rmq.URL, "amqps://") {
+		return fmt.Errorf("rabbitmq.url must start with 'amqp://' or 'amqps://'")
+	}
+
+	// Validate exchange type if provided
+	if rmq.ExchangeType != "" {
+		validExchangeTypes := map[string]bool{
+			"direct":  true,
+			"fanout":  true,
+			"topic":   true,
+			"headers": true,
+		}
+		if !validExchangeTypes[rmq.ExchangeType] {
+			return fmt.Errorf("rabbitmq.exchange_type must be one of: direct, fanout, topic, headers")
+		}
+	}
+
+	// Validate prefetch_count (must be non-negative)
+	if rmq.PrefetchCount < 0 {
+		return fmt.Errorf("rabbitmq.prefetch_count must be non-negative")
+	}
+
+	// Validate prefetch_size (must be non-negative)
+	if rmq.PrefetchSize < 0 {
+		return fmt.Errorf("rabbitmq.prefetch_size must be non-negative")
+	}
+
+	return nil
+}
+
+// validateGooglePubSubConfig validates Google Pub/Sub configuration
+func validateGooglePubSubConfig(cfg *config) error {
+	gps := cfg.Broker.GooglePubSub
+
+	// ProjectID is required
+	if gps.ProjectID == "" {
+		return fmt.Errorf("googlepubsub.project_id is required")
+	}
+
+	// Validate MaxOutstandingMessages (must be non-negative if provided)
+	if gps.MaxOutstandingMessages < 0 {
+		return fmt.Errorf("googlepubsub.max_outstanding_messages must be non-negative")
+	}
+
+	// Validate NumGoroutines (must be non-negative if provided)
+	if gps.NumGoroutines < 0 {
+		return fmt.Errorf("googlepubsub.num_goroutines must be non-negative")
+	}
+
+	return nil
 }

@@ -112,7 +112,7 @@ func TestRabbitMQPerformance(t *testing.T) {
 				"id":        eventID,
 			})
 
-			if err := pub.Publish(ctx, "perf-topic", &evt); err != nil {
+			if err := pub.Publish("perf-topic", &evt); err != nil {
 				t.Logf("Error publishing message: %v", err)
 				continue
 			}
@@ -247,7 +247,7 @@ func TestGooglePubSubPerformance(t *testing.T) {
 				"id":        eventID,
 			})
 
-			if err := pub.Publish(ctx, "perf-topic", &evt); err != nil {
+			if err := pub.Publish("perf-topic", &evt); err != nil {
 				t.Logf("Error publishing message: %v", err)
 				continue
 			}

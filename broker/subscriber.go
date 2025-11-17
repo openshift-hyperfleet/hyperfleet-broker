@@ -28,6 +28,7 @@ type subscriber struct {
 	parallelism    int
 	subscriptionID string
 	logger         watermill.LoggerAdapter
+	wg             sync.WaitGroup
 }
 
 // Subscribe subscribes to a topic and processes messages with the provided handler
@@ -52,10 +53,11 @@ func (s *subscriber) Subscribe(ctx context.Context, topic string, handler Handle
 	messageChan := make(chan *message.Message, s.parallelism)
 
 	// Start worker pool
-	var wg sync.WaitGroup
+	//var wg sync.WaitGroup
 	for i := 0; i < s.parallelism; i++ {
-		wg.Add(1)
-		go s.worker(ctx, messageChan, handler, &wg)
+		s.wg.Go(func() {
+			s.worker(ctx, messageChan, handler)
+		})
 	}
 
 	// Distribute messages to workers
@@ -80,17 +82,14 @@ func (s *subscriber) Subscribe(ctx context.Context, topic string, handler Handle
 
 	// Wait for context cancellation
 	go func() {
-		<-ctx.Done()
-		wg.Wait()
+		s.wg.Wait()
 	}()
 
 	return nil
 }
 
 // worker processes messages from the message channel
-func (s *subscriber) worker(ctx context.Context, messages <-chan *message.Message, handler HandlerFunc, wg *sync.WaitGroup) {
-	defer wg.Done()
-
+func (s *subscriber) worker(ctx context.Context, messages <-chan *message.Message, handler HandlerFunc) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -127,5 +126,10 @@ func (s *subscriber) worker(ctx context.Context, messages <-chan *message.Messag
 
 // Close closes the underlying subscriber
 func (s *subscriber) Close() error {
-	return s.sub.Close()
+	err := s.sub.Close()
+	if err != nil {
+		return err
+	}
+	s.wg.Wait()
+	return nil
 }
