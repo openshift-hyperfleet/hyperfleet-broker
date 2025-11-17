@@ -128,7 +128,7 @@ func buildConfigFromMap(configMap map[string]string) (*config, error) {
 
 	// Set defaults
 	v.SetDefault("log_config", false)
-	v.SetDefault("subscriber.parallelism", 1)
+	v.SetDefault("subscriber.parallelism", DefaultSubscriberParallelism)
 
 	// Set values from the map
 	// Viper will handle type conversion from string to int/bool during Unmarshal
