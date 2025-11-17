@@ -165,9 +165,45 @@ broker:
 # Subscriber Configuration
 subscriber:
   parallelism: 10  # Number of parallel workers
+
+# Debugging: Enable configuration logging
+log_config: false  # Set to true to log full configuration on startup
 ```
 
 </details>
+
+### Configuration Options
+
+#### `log_config` (boolean, default: `false`)
+
+When enabled, the library will log the complete configuration (as JSON) when creating a Publisher or Subscriber. This is useful for:
+- **Debugging**: Verify that configuration is loaded correctly
+- **Troubleshooting**: See the actual configuration values being used (including environment variable overrides)
+- **Development**: Understand how configuration precedence works
+
+**Security Note**: Passwords in RabbitMQ URLs are automatically masked (shown as `***`) when logging.
+
+**Example:**
+```yaml
+log_config: true
+```
+
+When enabled, you'll see output like:
+```
+=== Publisher Configuration (JSON) ===
+{
+  "log_config": true,
+  "broker": {
+    "type": "rabbitmq",
+    "rabbitmq": {
+      "url": "amqp://guest:***@localhost:5672/",
+      ...
+    }
+  },
+  ...
+}
+========================================
+```
 
 ### Environment Variable Overrides
 
