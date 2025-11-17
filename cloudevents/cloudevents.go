@@ -159,8 +159,3 @@ func isCloudEventsAttribute(key string) bool {
 	}
 	return false
 }
-
-// GetEventType extracts the CloudEvents type from a Watermill message
-func GetEventType(msg *message.Message) string {
-	return msg.Metadata.Get(metadataTypeKey)
-}

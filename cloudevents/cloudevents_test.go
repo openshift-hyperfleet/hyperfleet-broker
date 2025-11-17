@@ -377,37 +377,3 @@ func TestIsCloudEventsAttribute(t *testing.T) {
 		})
 	}
 }
-
-func TestGetEventType(t *testing.T) {
-	tests := []struct {
-		name     string
-		setupMsg func() *message.Message
-		expected string
-	}{
-		{
-			name: "message with type",
-			setupMsg: func() *message.Message {
-				msg := message.NewMessage("test-uuid", []byte(`{}`))
-				msg.Metadata.Set(metadataTypeKey, "com.example.test.event")
-				return msg
-			},
-			expected: "com.example.test.event",
-		},
-		{
-			name: "message without type",
-			setupMsg: func() *message.Message {
-				msg := message.NewMessage("test-uuid", []byte(`{}`))
-				return msg
-			},
-			expected: "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			msg := tt.setupMsg()
-			result := GetEventType(msg)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
