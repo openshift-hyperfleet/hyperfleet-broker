@@ -3,6 +3,7 @@ package broker
 import (
 	"context"
 	"fmt"
+	"runtime/debug"
 	"sync"
 
 	"github.com/ThreeDotsLabs/watermill"
@@ -90,15 +91,15 @@ func (s *subscriber) Subscribe(ctx context.Context, topic string, handler Handle
 // worker processes messages from the message channel
 func (s *subscriber) worker(ctx context.Context, messages <-chan *message.Message, handler HandlerFunc) {
 	defer func() {
-          if r := recover(); r != nil {
-              s.logger.Error("Worker panicked - recovered",
-  fmt.Errorf("panic: %v", r), watermill.LogFields{
-                  "subscription_id": s.subscriptionID,
-                  "topic":           topic,
-                  "stack":           string(debug.Stack()),
-              })
-          }
-      }()
+		if r := recover(); r != nil {
+			s.logger.Error("Worker panicked - recovered",
+				fmt.Errorf("panic: %v", r), watermill.LogFields{
+					"subscription_id": s.subscriptionID,
+					"stack":           string(debug.Stack()),
+				})
+		}
+	}()
+	for {
 		select {
 		case <-ctx.Done():
 			return

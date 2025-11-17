@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -947,6 +948,109 @@ func TestRabbitMQCloseWaitsForInFlightMessages(t *testing.T) {
 // TestGooglePubSubCloseWaitsForInFlightMessages tests that Close() waits for in-flight message processing
 func TestGooglePubSubCloseWaitsForInFlightMessages(t *testing.T) {
 	testCloseWaitsForInFlightMessages(t, brokerTestConfig{
+		brokerType:     "googlepubsub",
+		setupSleep:     2 * time.Second,
+		receiveTimeout: 10 * time.Second,
+	})
+}
+
+// testPanicHandler tests that a handler that panics doesn't cause Close() to hang
+func testPanicHandler(t *testing.T, cfg brokerTestConfig) {
+	ctx := context.Background()
+	configMap := setupBrokerTest(t, cfg)
+	configMap["subscriber.parallelism"] = "3"
+
+	pub, err := broker.NewPublisher(configMap)
+	require.NoError(t, err)
+	defer pub.Close()
+
+	subscriptionId := "panic-test-subscription"
+	sub, err := broker.NewSubscriber(subscriptionId, configMap)
+	require.NoError(t, err)
+
+	// Track how many times the handler was called (before panic)
+	var handlerCallCount int64
+	panicOccurred := make(chan struct{})
+	var panicOnce sync.Once
+
+	// Handler that panics
+	panicHandler := func(ctx context.Context, e *event.Event) error {
+		atomic.AddInt64(&handlerCallCount, 1)
+		panicOnce.Do(func() {
+			close(panicOccurred) // Signal that panic is about to occur
+		})
+		panic(fmt.Sprintf("intentional panic for message %s", e.ID()))
+	}
+
+	err = sub.Subscribe(ctx, "panic-test-topic", panicHandler)
+	require.NoError(t, err)
+
+	time.Sleep(cfg.setupSleep)
+
+	// Publish a few messages
+	numMessages := 3
+	for i := 0; i < numMessages; i++ {
+		evt := event.New()
+		evt.SetType("com.example.test.event")
+		evt.SetSource("test-source")
+		evt.SetID(fmt.Sprintf("panic-test-id-%d", i))
+		evt.SetData(event.ApplicationJSON, map[string]int{"index": i})
+
+		err = pub.Publish("panic-test-topic", &evt)
+		require.NoError(t, err)
+	}
+
+	// Wait for at least one panic to occur
+	select {
+	case <-panicOccurred:
+		// Panic has occurred, good
+	case <-time.After(cfg.receiveTimeout):
+		t.Fatal("timeout waiting for panic to occur")
+	}
+
+	// Give some time for messages to be received and panics to happen
+	time.Sleep(1 * time.Second)
+
+	// Verify that at least one handler was called (and panicked)
+	assert.Greater(t, atomic.LoadInt64(&handlerCallCount), int64(0),
+		"handler should have been called at least once")
+
+	// Close() should complete without hanging, even with panics
+	closeStartTime := time.Now()
+	closeDone := make(chan error, 1)
+
+	go func() {
+		closeDone <- sub.Close()
+	}()
+
+	// Wait for Close() to complete with a timeout
+	select {
+	case err := <-closeDone:
+		closeDuration := time.Since(closeStartTime)
+		require.NoError(t, err, "Close() should complete successfully")
+		// Close() should complete reasonably quickly (not hang)
+		// It should wait for workers to finish, but not indefinitely
+		maxExpectedDuration := 5 * time.Second
+		assert.Less(t, closeDuration, maxExpectedDuration,
+			"Close() should complete without hanging, even with panics")
+		t.Logf("Close() completed in %v despite panics", closeDuration)
+	case <-time.After(10 * time.Second):
+		t.Fatal("Close() hung - it should complete even when handlers panic")
+	}
+}
+
+// TestRabbitMQPanicHandler tests that a handler that panics doesn't cause Close() to hang
+func TestRabbitMQPanicHandler(t *testing.T) {
+	testPanicHandler(t, brokerTestConfig{
+		brokerType:     "rabbitmq",
+		setupSleep:     500 * time.Millisecond,
+		receiveTimeout: 5 * time.Second,
+	})
+}
+
+// TestGooglePubSubPanicHandler tests that a handler that panics doesn't cause Close() to hang
+func TestGooglePubSubPanicHandler(t *testing.T) {
+	testPanicHandler(t, brokerTestConfig{
 		brokerType:     "googlepubsub",
 		setupSleep:     2 * time.Second,
 		receiveTimeout: 10 * time.Second,
