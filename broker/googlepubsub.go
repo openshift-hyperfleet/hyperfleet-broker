@@ -43,3 +43,25 @@ func newGooglePubSubSubscriber(cfg *config, logger watermill.LoggerAdapter, subs
 
 	return googlepubsub.NewSubscriber(pubsubConfig, logger)
 }
+
+// validateGooglePubSubConfig validates Google Pub/Sub configuration
+func validateGooglePubSubConfig(cfg *config) error {
+	gps := cfg.Broker.GooglePubSub
+
+	// ProjectID is required
+	if gps.ProjectID == "" {
+		return fmt.Errorf("googlepubsub.project_id is required")
+	}
+
+	// Validate MaxOutstandingMessages (must be non-negative if provided)
+	if gps.MaxOutstandingMessages < 0 {
+		return fmt.Errorf("googlepubsub.max_outstanding_messages must be non-negative")
+	}
+
+	// Validate NumGoroutines (must be non-negative if provided)
+	if gps.NumGoroutines < 0 {
+		return fmt.Errorf("googlepubsub.num_goroutines must be non-negative")
+	}
+
+	return nil
+}

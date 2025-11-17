@@ -2,6 +2,7 @@ package broker
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/ThreeDotsLabs/watermill"
 	amqp "github.com/ThreeDotsLabs/watermill-amqp/v3/pkg/amqp"
@@ -87,4 +88,44 @@ func newRabbitMQSubscriber(cfg *config, logger watermill.LoggerAdapter, subscrip
 	}
 
 	return amqp.NewSubscriber(amqpConfig, logger)
+}
+
+// validateRabbitMQConfig validates RabbitMQ configuration
+func validateRabbitMQConfig(cfg *config) error {
+	rmq := cfg.Broker.RabbitMQ
+
+	// URL is required
+	if rmq.URL == "" {
+		return fmt.Errorf("rabbitmq.url is required")
+	}
+
+	// Validate URL format (should start with amqp:// or amqps://)
+	if !strings.HasPrefix(rmq.URL, "amqp://") && !strings.HasPrefix(rmq.URL, "amqps://") {
+		return fmt.Errorf("rabbitmq.url must start with 'amqp://' or 'amqps://'")
+	}
+
+	// Validate exchange type if provided
+	if rmq.ExchangeType != "" {
+		validExchangeTypes := map[string]bool{
+			"direct":  true,
+			"fanout":  true,
+			"topic":   true,
+			"headers": true,
+		}
+		if !validExchangeTypes[rmq.ExchangeType] {
+			return fmt.Errorf("rabbitmq.exchange_type must be one of: direct, fanout, topic, headers")
+		}
+	}
+
+	// Validate prefetch_count (must be non-negative)
+	if rmq.PrefetchCount < 0 {
+		return fmt.Errorf("rabbitmq.prefetch_count must be non-negative")
+	}
+
+	// Validate prefetch_size (must be non-negative)
+	if rmq.PrefetchSize < 0 {
+		return fmt.Errorf("rabbitmq.prefetch_size must be non-negative")
+	}
+
+	return nil
 }
