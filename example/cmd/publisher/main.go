@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"os"
@@ -19,8 +18,6 @@ func main() {
 		log.Fatalf("Failed to create publisher: %v", err)
 	}
 	defer publisher.Close()
-
-	ctx := context.Background()
 
 	topic := "example-topic"
 	// Get topic from command line argument
@@ -52,7 +49,7 @@ func main() {
 		})
 
 		// Publish to topic
-		if err := publisher.Publish(ctx, topic, &evt); err != nil {
+		if err := publisher.Publish(topic, &evt); err != nil {
 			log.Printf("Error publishing event: %v", err)
 		} else {
 			log.Printf("Published event #%d (ID: %s)", counter, evt.ID())
