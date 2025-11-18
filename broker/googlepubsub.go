@@ -18,16 +18,16 @@ func newGooglePubSubPublisher(cfg *config, logger watermill.LoggerAdapter) (mess
 }
 
 // newGooglePubSubSubscriber creates a Google Pub/Sub subscriber
-func newGooglePubSubSubscriber(cfg *config, logger watermill.LoggerAdapter, subscriptionId string) (message.Subscriber, error) {
+func newGooglePubSubSubscriber(cfg *config, logger watermill.LoggerAdapter, subscriptionID string) (message.Subscriber, error) {
 	// Configure subscription name generator to use subscription ID
 	// The topic passed to Subscribe will be the original topic (no colon)
 	// We append subscription ID to create unique subscription names
 	pubsubConfig := googlepubsub.SubscriberConfig{
 		ProjectID: cfg.Broker.GooglePubSub.ProjectID,
 		GenerateSubscriptionName: func(topic string) string {
-			// Generate subscription name: "topic-subscriptionId"
-			// This allows subscribers with the same subscriptionId to share the same subscription
-			return fmt.Sprintf("%s-%s", topic, subscriptionId)
+			// Generate subscription name: "topic-subscriptionID"
+			// This allows subscribers with the same subscriptionID to share the same subscription
+			return fmt.Sprintf("%s-%s", topic, subscriptionID)
 		},
 	}
 

@@ -3,8 +3,10 @@ package broker
 import (
 	"context"
 	"fmt"
+	"os"
 	"runtime"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -42,6 +44,51 @@ func setupRabbitMQContainer(t *testing.T) string {
 	return connectionString
 }
 
+// setupPubSubEmulator starts a Google Pub/Sub emulator testcontainer and returns the project ID and emulator host
+func setupPubSubEmulator(t *testing.T) (string, string) {
+	ctx := context.Background()
+
+	// Create a generic container for Pub/Sub emulator
+	req := testcontainers.ContainerRequest{
+		Image:        "gcr.io/google.com/cloudsdktool/cloud-sdk:emulators",
+		ExposedPorts: []string{"8085/tcp"},
+		Cmd:          []string{"gcloud", "beta", "emulators", "pubsub", "start", "--host-port=0.0.0.0:8085"},
+		WaitingFor: wait.ForLog("Server started").
+			WithOccurrence(1).
+			WithStartupTimeout(60 * time.Second),
+	}
+
+	pubsubContainer, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+		ContainerRequest: req,
+		Started:          true,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		if err := pubsubContainer.Terminate(ctx); err != nil {
+			t.Logf("failed to terminate pubsub container: %v", err)
+		}
+	})
+
+	projectID := "test-project"
+
+	// Get the container host and port
+	host, err := pubsubContainer.Host(ctx)
+	require.NoError(t, err)
+
+	mappedPort, err := pubsubContainer.MappedPort(ctx, "8085")
+	require.NoError(t, err)
+
+	emulatorHost := fmt.Sprintf("%s:%s", host, mappedPort.Port())
+
+	// Set environment variable for Pub/Sub emulator
+	os.Setenv("PUBSUB_EMULATOR_HOST", emulatorHost)
+	t.Cleanup(func() {
+		os.Unsetenv("PUBSUB_EMULATOR_HOST")
+	})
+
+	return projectID, emulatorHost
+}
+
 func buildConfigMap(brokerType string, rabbitMQURL string, pubsubProjectID string) map[string]string {
 	configMap := map[string]string{
 		"broker.type":            brokerType,
@@ -57,14 +104,38 @@ func buildConfigMap(brokerType string, rabbitMQURL string, pubsubProjectID strin
 	return configMap
 }
 
-// ==================== MAIN TEST ====================
-// TestGoroutineLeakProof demonstrates the goroutine leak in the current implementation
-// This test WILL FAIL, proving that goroutines are leaked after Close()
-func TestGoroutineLeak(t *testing.T) {
+// brokerTestConfig holds broker-specific test configuration
+type brokerTestConfig struct {
+	brokerType     string
+	setupSleep     time.Duration
+	receiveTimeout time.Duration
+}
 
-	rabbitMQURL := setupRabbitMQContainer(t)
-	configMap := buildConfigMap("rabbitmq", rabbitMQURL, "")
+// setupBrokerTest sets up a broker test environment and returns the config map
+func setupBrokerTest(t *testing.T, cfg brokerTestConfig) map[string]string {
+	var configMap map[string]string
+
+	switch cfg.brokerType {
+	case "rabbitmq":
+		rabbitMQURL := setupRabbitMQContainer(t)
+		configMap = buildConfigMap("rabbitmq", rabbitMQURL, "")
+	case "googlepubsub":
+		projectID, _ := setupPubSubEmulator(t)
+		configMap = buildConfigMap("googlepubsub", "", projectID)
+	default:
+		t.Fatalf("unsupported broker type: %s", cfg.brokerType)
+	}
+
+	return configMap
+}
+
+// ==================== MAIN TEST ====================
+// testGoroutineLeak demonstrates the goroutine leak in the current implementation
+// This test WILL FAIL, proving that goroutines are leaked after Close()
+func testGoroutineLeak(t *testing.T, cfg brokerTestConfig) {
+	configMap := setupBrokerTest(t, cfg)
 	pub, err := NewPublisher(configMap)
+	require.NoError(t, err)
 
 	// Clean up environment
 	runtime.GC()
@@ -74,6 +145,7 @@ func TestGoroutineLeak(t *testing.T) {
 	t.Logf("📊 Goroutines BEFORE: %d", before)
 
 	sub, err := NewSubscriber("leak-demo", configMap)
+	require.NoError(t, err)
 
 	ctx := context.Background()
 
@@ -104,7 +176,7 @@ func TestGoroutineLeak(t *testing.T) {
 	}
 
 	// Wait for goroutines to start
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(cfg.setupSleep)
 
 	during := runtime.NumGoroutine()
 	created := during - before
@@ -170,7 +242,25 @@ func TestGoroutineLeak(t *testing.T) {
 	}
 }
 
-func TestLeakIncreasesWithUsage2(t *testing.T) {
+// TestRabbitMQGoroutineLeak tests goroutine leak with RabbitMQ
+func TestRabbitMQGoroutineLeak(t *testing.T) {
+	testGoroutineLeak(t, brokerTestConfig{
+		brokerType:     "rabbitmq",
+		setupSleep:     100 * time.Millisecond,
+		receiveTimeout: 5 * time.Second,
+	})
+}
+
+// TestGooglePubSubGoroutineLeak tests goroutine leak with Google Pub/Sub
+func TestGooglePubSubGoroutineLeak(t *testing.T) {
+	testGoroutineLeak(t, brokerTestConfig{
+		brokerType:     "googlepubsub",
+		setupSleep:     2 * time.Second,
+		receiveTimeout: 10 * time.Second,
+	})
+}
+
+func testLeakIncreasesWithUsage(t *testing.T, cfg brokerTestConfig) {
 	t.Log("=== PROOF: Leak grows with each Subscribe() call ===")
 	t.Log("")
 
@@ -184,7 +274,7 @@ func TestLeakIncreasesWithUsage2(t *testing.T) {
 	}{
 		{1, 4},  // 1 subscription = 4 goroutines
 		{3, 12}, // 3 subscriptions = 12 goroutines
-		{5, 20}, // 5 subscriptions = 20 goroutines
+		{5, 20}, // scriptions = 20 goroutines
 	}
 
 	for _, tc := range testCases {
@@ -193,8 +283,7 @@ func TestLeakIncreasesWithUsage2(t *testing.T) {
 			time.Sleep(50 * time.Millisecond)
 			before := runtime.NumGoroutine()
 
-			rabbitMQURL := setupRabbitMQContainer(t)
-			configMap := buildConfigMap("rabbitmq", rabbitMQURL, "")
+			configMap := setupBrokerTest(t, cfg)
 
 			sub, err := NewSubscriber("leak-demo", configMap)
 			require.NoError(t, err)
@@ -205,7 +294,7 @@ func TestLeakIncreasesWithUsage2(t *testing.T) {
 			for i := 0; i < tc.numSubscriptions; i++ {
 				sub.Subscribe(ctx, fmt.Sprintf("topic-%d", i), handler)
 			}
-			time.Sleep(100 * time.Millisecond)
+			time.Sleep(cfg.setupSleep)
 
 			during := runtime.NumGoroutine()
 
@@ -220,13 +309,159 @@ func TestLeakIncreasesWithUsage2(t *testing.T) {
 
 			t.Logf("Subscriptions: %d | Before: %d | During: %d | After: %d | Leaked: %d",
 				tc.numSubscriptions, before, during, after, leaked)
-			t.Logf("Expected leak: ~%d | Actual leak: %d", tc.expectedLeak, leaked)
 
 			assert.Equal(t, 0, leaked, "Leak should be 0")
 		})
 	}
 
 	t.Log("")
-	t.Log("💡 OBSERVATION: Leak increases proportionally with Subscribe() calls")
-	t.Log("   This proves goroutines are accumulated without any lifecycle management")
+}
+
+// TestRabbitMQLeakIncreasesWithUsage tests that leak grows with each Subscribe() call using RabbitMQ
+func TestRabbitMQLeakIncreasesWithUsage(t *testing.T) {
+	testLeakIncreasesWithUsage(t, brokerTestConfig{
+		brokerType:     "rabbitmq",
+		setupSleep:     100 * time.Millisecond,
+		receiveTimeout: 5 * time.Second,
+	})
+}
+
+// TestGooglePubSubLeakIncreasesWithUsage tests that leak grows with each Subscribe() call using Google Pub/Sub
+func TestGooglePubSubLeakIncreasesWithUsage(t *testing.T) {
+	testLeakIncreasesWithUsage(t, brokerTestConfig{
+		brokerType:     "googlepubsub",
+		setupSleep:     2 * time.Second,
+		receiveTimeout: 10 * time.Second,
+	})
+}
+
+// testMultipleSubscriptionsSameTopic tests that subscribing multiple times to the same topic
+// and then closing the subscriber does not leak goroutines
+func testMultipleSubscriptionsSameTopic(t *testing.T, cfg brokerTestConfig) {
+	t.Log("=== Testing: Multiple subscriptions to the SAME topic ===")
+	t.Log("")
+
+	configMap := setupBrokerTest(t, cfg)
+
+	// Clean up environment
+	runtime.GC()
+	time.Sleep(50 * time.Millisecond)
+
+	before := runtime.NumGoroutine()
+	t.Logf("📊 Goroutines BEFORE: %d", before)
+
+	// Create publisher and subscriber
+	pub, err := NewPublisher(configMap)
+	require.NoError(t, err)
+
+	sub, err := NewSubscriber("same-topic-test", configMap)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	// Track how many times each handler is called
+	var mu sync.Mutex
+	handlerCallCounts := make(map[int]int)
+
+	// Create multiple handlers for the same topic
+	numSubscriptions := 5
+	sameTopic := "shared-topic"
+
+	t.Logf("🔄 Subscribing %d times to the SAME topic: '%s'", numSubscriptions, sameTopic)
+	t.Log("   Each subscription creates:")
+	t.Log("   - parallelism workers (1)")
+	t.Log("   - 1 message distributor goroutine")
+	t.Log("   = 2 goroutines per subscription")
+	t.Log("")
+
+	// Subscribe multiple times to the same topic
+	for i := 0; i < numSubscriptions; i++ {
+		handlerID := i
+		handler := func(ctx context.Context, evt *event.Event) error {
+			mu.Lock()
+			handlerCallCounts[handlerID]++
+			mu.Unlock()
+			return nil
+		}
+		err := sub.Subscribe(ctx, sameTopic, handler)
+		require.NoError(t, err, "Failed to subscribe handler %d", i)
+	}
+
+	// Wait for goroutines to start
+	time.Sleep(cfg.setupSleep)
+
+	during := runtime.NumGoroutine()
+	created := during - before
+	t.Logf("📊 Goroutines DURING subscribe: %d (created: %d)", during, created)
+	t.Log("")
+
+	// Publish some messages to verify subscriptions are working
+	numMessages := 3
+	t.Logf("📨 Publishing %d messages to topic '%s'...", numMessages, sameTopic)
+	for i := 0; i < numMessages; i++ {
+		evt := event.New()
+		evt.SetType("com.example.test.event")
+		evt.SetSource("test-source")
+		evt.SetID(fmt.Sprintf("msg-id-%d", i))
+		evt.SetData(event.ApplicationJSON, map[string]int{"index": i})
+
+		err = pub.Publish(sameTopic, &evt)
+		require.NoError(t, err)
+	}
+
+	// Give handlers time to process messages
+	time.Sleep(200 * time.Millisecond)
+
+	// Close subscriber
+	t.Log("🛑 Calling Close()...")
+	err = sub.Close()
+	require.NoError(t, err)
+
+	t.Log("🛑 Calling Close() on publisher...")
+	err = pub.Close()
+	require.NoError(t, err, "Failed to close publisher")
+
+	// Wait for cleanup
+	time.Sleep(300 * time.Millisecond)
+	runtime.GC()
+	time.Sleep(50 * time.Millisecond)
+
+	after := runtime.NumGoroutine()
+	leaked := after - before
+
+	t.Logf("📊 Goroutines AFTER Close(): %d", after)
+	t.Logf("📊 Goroutines leaked: %d", leaked)
+	t.Log("")
+
+	// Verify no goroutine leaks
+	if leaked > 4 {
+		t.Logf("🔴 GOROUTINES LEAKED: %d", leaked)
+		t.Log("")
+		t.Log("❌ PROBLEM: Multiple subscriptions to the same topic leak goroutines")
+		t.Log("   Each Subscribe() call creates goroutines that are not properly cleaned up")
+		t.Log("")
+		assert.FailNow(t,
+			fmt.Sprintf("GOROUTINE LEAK DETECTED! %d goroutines leaked after Close() with multiple subscriptions to same topic.", leaked))
+	} else {
+		t.Logf("✅ SUCCESS: Only %d goroutines remaining (acceptable)", leaked)
+		t.Log("   All goroutines from multiple subscriptions to the same topic were properly cleaned up")
+	}
+}
+
+// TestRabbitMQMultipleSubscriptionsSameTopic tests multiple subscriptions to the same topic with RabbitMQ
+func TestRabbitMQMultipleSubscriptionsSameTopic(t *testing.T) {
+	testMultipleSubscriptionsSameTopic(t, brokerTestConfig{
+		brokerType:     "rabbitmq",
+		setupSleep:     100 * time.Millisecond,
+		receiveTimeout: 5 * time.Second,
+	})
+}
+
+// TestGooglePubSubMultipleSubscriptionsSameTopic tests multiple subscriptions to the same topic with Google Pub/Sub
+func TestGooglePubSubMultipleSubscriptionsSameTopic(t *testing.T) {
+	testMultipleSubscriptionsSameTopic(t, brokerTestConfig{
+		brokerType:     "googlepubsub",
+		setupSleep:     2 * time.Second,
+		receiveTimeout: 10 * time.Second,
+	})
 }

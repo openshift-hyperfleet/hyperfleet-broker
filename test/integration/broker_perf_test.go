@@ -53,13 +53,13 @@ func TestRabbitMQPerformance(t *testing.T) {
 	require.NoError(t, err)
 	defer pub.Close()
 
-	// Create two subscribers with the same subscriptionId (shared subscription)
-	subscriptionId := "perf-subscription"
-	sub1, err := broker.NewSubscriber(subscriptionId, configMap)
+	// Create two subscribers with the same subscriptionID (shared subscription)
+	subscriptionID := "perf-subscription"
+	sub1, err := broker.NewSubscriber(subscriptionID, configMap)
 	require.NoError(t, err)
 	defer sub1.Close()
 
-	sub2, err := broker.NewSubscriber(subscriptionId, configMap)
+	sub2, err := broker.NewSubscriber(subscriptionID, configMap)
 	require.NoError(t, err)
 	defer sub2.Close()
 
@@ -185,13 +185,13 @@ func TestGooglePubSubPerformance(t *testing.T) {
 	require.NoError(t, err)
 	defer pub.Close()
 
-	// Create two subscribers with the same subscriptionId (shared subscription)
-	subscriptionId := "perf-subscription"
-	sub1, err := broker.NewSubscriber(subscriptionId, configMap)
+	// Create two subscribers with the same subscriptionID (shared subscription)
+	subscriptionID := "perf-subscription"
+	sub1, err := broker.NewSubscriber(subscriptionID, configMap)
 	require.NoError(t, err)
 	defer sub1.Close()
 
-	sub2, err := broker.NewSubscriber(subscriptionId, configMap)
+	sub2, err := broker.NewSubscriber(subscriptionID, configMap)
 	require.NoError(t, err)
 	defer sub2.Close()
 

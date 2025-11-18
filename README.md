@@ -71,6 +71,10 @@ func main() {
 
 </details>
 
+Note for Google PubSub: The Google Pub/Sub publisher implementation (via Watermill/Google Cloud SDK) starts background goroutines (for batching, connection management, etc.). 
+The app should call Close() to not leak 
+
+
 <details>
 <summary><strong>Subscriber Example</strong></summary>
 
@@ -181,6 +185,12 @@ The number of goroutines that the subscriber will create and also the value for 
 This allows the subscriber to process multiple messages in parallel.
 
 E.g. in RabbitMQ this sets the `PrefetchCount` parameter for the topic.
+
+⚠️ Note: parallelism does not work properly with RabbitMQ. The watermill implementation of the subscriber uses a single goroutine that blocks until a received message is ack/nack.
+The best way to deal with this is to use `subscriber.Subscribe()` as many times as the desired parallelism
+This can be followed up in this library issue. https://github.com/ThreeDotsLabs/watermill/issues/586
+
+
 
 #### `log_config` (boolean, default: `false`)
 
@@ -389,3 +399,19 @@ These files are mounted into the containers and used by the publisher and subscr
 - [CloudEvents Specification](https://github.com/cloudevents/spec)
 - [RabbitMQ Documentation](https://www.rabbitmq.com/documentation.html)
 - [Google Cloud Pub/Sub Documentation](https://cloud.google.com/pubsub/docs)
+
+# Running tests in vscode
+
+As integration tests use testcontainers, they can take a while to execute. 
+If executing tests from vscode, you can specify this in your `settings.json` for the workspace
+
+```
+{
+    "go.testEnvVars": {
+        "TESTCONTAINERS_RYUK_DISABLED": "true"
+    },
+    "go.testFlags": [
+        "-timeout=5m"
+    ]
+}
+```

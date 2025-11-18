@@ -42,18 +42,18 @@ func newRabbitMQPublisher(cfg *config, logger watermill.LoggerAdapter) (message.
 }
 
 // newRabbitMQSubscriber creates a RabbitMQ subscriber
-func newRabbitMQSubscriber(cfg *config, logger watermill.LoggerAdapter, subscriptionId string) (message.Subscriber, error) {
+func newRabbitMQSubscriber(cfg *config, logger watermill.LoggerAdapter, subscriptionID string) (message.Subscriber, error) {
 	// Create a queue name generator that incorporates subscription IDs
 	// The topic passed to Subscribe will be the original topic, and we append subscription ID for queue naming
 	queueNameGenerator := func(topic string) string {
 		if cfg.Broker.RabbitMQ.Queue != "" {
 			// If a static queue name is provided, use it as base and append subscription ID
-			// This allows subscribers with the same subscriptionId to share the same queue
-			return fmt.Sprintf("%s-%s", cfg.Broker.RabbitMQ.Queue, subscriptionId)
+			// This allows subscribers with the same subscriptionID to share the same queue
+			return fmt.Sprintf("%s-%s", cfg.Broker.RabbitMQ.Queue, subscriptionID)
 		}
-		// Generate queue name: "topic-subscriptionId"
-		// This allows subscribers with the same subscriptionId to share the same queue
-		return fmt.Sprintf("%s-%s", topic, subscriptionId)
+		// Generate queue name: "topic-subscriptionID"
+		// This allows subscribers with the same subscriptionID to share the same queue
+		return fmt.Sprintf("%s-%s", topic, subscriptionID)
 	}
 
 	amqpConfig := amqp.NewDurablePubSubConfig(

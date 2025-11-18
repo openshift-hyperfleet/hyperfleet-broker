@@ -32,7 +32,7 @@ type subscriber struct {
 }
 
 // Subscribe subscribes to a topic and processes messages with the provided handler
-// The subscriptionId stored in the subscriber struct determines whether subscribers share messages
+// The subscriptionID stored in the subscriber struct determines whether subscribers share messages
 // (same ID = shared, different IDs = separate)
 func (s *subscriber) Subscribe(ctx context.Context, topic string, handler HandlerFunc) error {
 	if handler == nil {
@@ -78,11 +78,6 @@ func (s *subscriber) Subscribe(ctx context.Context, topic string, handler Handle
 				}
 			}
 		}
-	}()
-
-	// Wait for context cancellation
-	go func() {
-		s.wg.Wait()
 	}()
 
 	return nil

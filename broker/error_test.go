@@ -94,23 +94,23 @@ func TestNewPublisherErrorHandling(t *testing.T) {
 func TestNewSubscriberErrorHandling(t *testing.T) {
 	tests := []struct {
 		name           string
-		subscriptionId string
+		subscriptionID string
 		configMap      map[string]string
 		expectError    bool
 		errorMsg       string
 	}{
 		{
 			name:           "empty subscription ID",
-			subscriptionId: "",
+			subscriptionID: "",
 			configMap: map[string]string{
 				"broker.type": "rabbitmq",
 			},
 			expectError: true,
-			errorMsg:    "subscriptionId is required",
+			errorMsg:    "subscriptionID is required",
 		},
 		{
 			name:           "unsupported broker type",
-			subscriptionId: "test-sub",
+			subscriptionID: "test-sub",
 			configMap: map[string]string{
 				"broker.type": "unsupported-broker",
 			},
@@ -119,7 +119,7 @@ func TestNewSubscriberErrorHandling(t *testing.T) {
 		},
 		{
 			name:           "missing googlepubsub project_id",
-			subscriptionId: "test-sub",
+			subscriptionID: "test-sub",
 			configMap: map[string]string{
 				"broker.type": "googlepubsub",
 			},
@@ -128,7 +128,7 @@ func TestNewSubscriberErrorHandling(t *testing.T) {
 		},
 		{
 			name:           "valid rabbitmq config",
-			subscriptionId: "test-sub",
+			subscriptionID: "test-sub",
 			configMap: map[string]string{
 				"broker.type": "rabbitmq",
 			},
@@ -136,7 +136,7 @@ func TestNewSubscriberErrorHandling(t *testing.T) {
 		},
 		{
 			name:           "valid googlepubsub config",
-			subscriptionId: "test-sub",
+			subscriptionID: "test-sub",
 			configMap: map[string]string{
 				"broker.type":                    "googlepubsub",
 				"broker.googlepubsub.project_id": "test-project",
@@ -145,7 +145,7 @@ func TestNewSubscriberErrorHandling(t *testing.T) {
 		},
 		{
 			name:           "nil config map",
-			subscriptionId: "test-sub",
+			subscriptionID: "test-sub",
 			configMap:      nil,
 			expectError:    false, // Falls back to loadConfig()
 		},
@@ -157,9 +157,9 @@ func TestNewSubscriberErrorHandling(t *testing.T) {
 			var err error
 
 			if tt.configMap == nil {
-				sub, err = NewSubscriber(tt.subscriptionId)
+				sub, err = NewSubscriber(tt.subscriptionID)
 			} else {
-				sub, err = NewSubscriber(tt.subscriptionId, tt.configMap)
+				sub, err = NewSubscriber(tt.subscriptionID, tt.configMap)
 			}
 
 			if tt.expectError {

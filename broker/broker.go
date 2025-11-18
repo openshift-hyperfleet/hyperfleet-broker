@@ -20,6 +20,7 @@ const (
 
 // NewPublisher creates a new publisher based on the configuration.
 // If configMap is provided, it will be used instead of loading from file.
+// Providing a configMap is meant to be used for testing purposes only.
 // Config keys should use dot notation (e.g., "broker.type", "broker.rabbitmq.url").
 func NewPublisher(configMap ...map[string]string) (Publisher, error) {
 	var cfg *config
@@ -67,12 +68,12 @@ func NewPublisher(configMap ...map[string]string) (Publisher, error) {
 }
 
 // NewSubscriber creates a new subscriber based on the configuration.
-// subscriptionId determines whether subscribers share messages (same ID = shared, different IDs = separate).
+// subscriptionID determines whether subscribers share messages (same ID = shared, different IDs = separate).
 // If configMap is provided, it will be used instead of loading from file.
 // Config keys should use dot notation (e.g., "broker.type", "broker.rabbitmq.url").
-func NewSubscriber(subscriptionId string, configMap ...map[string]string) (Subscriber, error) {
-	if subscriptionId == "" {
-		return nil, fmt.Errorf("subscriptionId is required")
+func NewSubscriber(subscriptionID string, configMap ...map[string]string) (Subscriber, error) {
+	if subscriptionID == "" {
+		return nil, fmt.Errorf("subscriptionID is required")
 	}
 
 	var cfg *config
@@ -103,12 +104,12 @@ func NewSubscriber(subscriptionId string, configMap ...map[string]string) (Subsc
 
 	switch cfg.Broker.Type {
 	case "rabbitmq":
-		sub, err = newRabbitMQSubscriber(cfg, logger, subscriptionId)
+		sub, err = newRabbitMQSubscriber(cfg, logger, subscriptionID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create RabbitMQ subscriber: %w", err)
 		}
 	case "googlepubsub":
-		sub, err = newGooglePubSubSubscriber(cfg, logger, subscriptionId)
+		sub, err = newGooglePubSubSubscriber(cfg, logger, subscriptionID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create Google Pub/Sub subscriber: %w", err)
 		}
@@ -123,7 +124,7 @@ func NewSubscriber(subscriptionId string, configMap ...map[string]string) (Subsc
 	return &subscriber{
 		sub:            sub,
 		parallelism:    parallelism,
-		subscriptionID: subscriptionId,
+		subscriptionID: subscriptionID,
 		logger:         logger,
 	}, nil
 }

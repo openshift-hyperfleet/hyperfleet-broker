@@ -179,8 +179,8 @@ func testPublisherSubscriber(t *testing.T, cfg brokerTestConfig) {
 	defer pub.Close()
 
 	// Create subscriber
-	subscriptionId := "test-subscription"
-	sub, err := broker.NewSubscriber(subscriptionId, configMap)
+	subscriptionID := "test-subscription"
+	sub, err := broker.NewSubscriber(subscriptionID, configMap)
 	require.NoError(t, err)
 	defer sub.Close()
 
@@ -248,8 +248,8 @@ func testMultipleEvents(t *testing.T, cfg brokerTestConfig) {
 	require.NoError(t, err)
 	defer pub.Close()
 
-	subscriptionId := "test-subscription"
-	sub, err := broker.NewSubscriber(subscriptionId, configMap)
+	subscriptionID := "test-subscription"
+	sub, err := broker.NewSubscriber(subscriptionID, configMap)
 	require.NoError(t, err)
 	defer sub.Close()
 
@@ -319,7 +319,7 @@ func TestGooglePubSubMultipleEvents(t *testing.T) {
 	})
 }
 
-// testSharedSubscription tests that two subscribers with the same subscriptionId share messages
+// testSharedSubscription tests that two subscribers with the same subscriptionID share messages
 func testSharedSubscription(t *testing.T, cfg brokerTestConfig) {
 	ctx := context.Background()
 	configMap := setupBrokerTest(t, cfg)
@@ -328,14 +328,14 @@ func testSharedSubscription(t *testing.T, cfg brokerTestConfig) {
 	require.NoError(t, err)
 	defer pub.Close()
 
-	// Create two subscribers with the same subscriptionId
+	// Create two subscribers with the same subscriptionID
 	// They should share messages (load balancing)
-	subscriptionId := "shared-subscription"
-	sub1, err := broker.NewSubscriber(subscriptionId, configMap)
+	subscriptionID := "shared-subscription"
+	sub1, err := broker.NewSubscriber(subscriptionID, configMap)
 	require.NoError(t, err)
 	defer sub1.Close()
 
-	sub2, err := broker.NewSubscriber(subscriptionId, configMap)
+	sub2, err := broker.NewSubscriber(subscriptionID, configMap)
 	require.NoError(t, err)
 	defer sub2.Close()
 
@@ -353,7 +353,7 @@ func testSharedSubscription(t *testing.T, cfg brokerTestConfig) {
 		return nil
 	}
 
-	// Both subscribe to the same topic with the same subscriptionId
+	// Both subscribe to the same topic with the same subscriptionID
 	err = sub1.Subscribe(ctx, "shared-topic", handler1)
 	require.NoError(t, err)
 
@@ -406,7 +406,7 @@ func testSharedSubscription(t *testing.T, cfg brokerTestConfig) {
 	assert.Equal(t, numMessages, sub1Count+sub2Count, "total messages should equal sum of both subscribers")
 }
 
-// TestRabbitMQSharedSubscription tests that two subscribers with the same subscriptionId share messages
+// TestRabbitMQSharedSubscription tests that two subscribers with the same subscriptionID share messages
 func TestRabbitMQSharedSubscription(t *testing.T) {
 	testSharedSubscription(t, brokerTestConfig{
 		brokerType:     "rabbitmq",
@@ -415,7 +415,7 @@ func TestRabbitMQSharedSubscription(t *testing.T) {
 	})
 }
 
-// TestGooglePubSubSharedSubscription tests that two subscribers with the same subscriptionId share messages
+// TestGooglePubSubSharedSubscription tests that two subscribers with the same subscriptionID share messages
 func TestGooglePubSubSharedSubscription(t *testing.T) {
 	testSharedSubscription(t, brokerTestConfig{
 		brokerType:     "googlepubsub",
@@ -424,7 +424,7 @@ func TestGooglePubSubSharedSubscription(t *testing.T) {
 	})
 }
 
-// testFanoutSubscription tests that two subscribers with different subscriptionIds each get all messages
+// testFanoutSubscription tests that two subscribers with different subscriptionIDs each get all messages
 func testFanoutSubscription(t *testing.T, cfg brokerTestConfig) {
 	ctx := context.Background()
 	configMap := setupBrokerTest(t, cfg)
@@ -433,7 +433,7 @@ func testFanoutSubscription(t *testing.T, cfg brokerTestConfig) {
 	require.NoError(t, err)
 	defer pub.Close()
 
-	// Create two subscribers with different subscriptionIds
+	// Create two subscribers with different subscriptionIDs
 	// Each should receive all messages (fanout behavior)
 	sub1, err := broker.NewSubscriber("fanout-subscription-1", configMap)
 	require.NoError(t, err)
@@ -457,7 +457,7 @@ func testFanoutSubscription(t *testing.T, cfg brokerTestConfig) {
 		return nil
 	}
 
-	// Both subscribe to the same topic but with different subscriptionIds
+	// Both subscribe to the same topic but with different subscriptionIDs
 	err = sub1.Subscribe(ctx, "fanout-topic", handler1)
 	require.NoError(t, err)
 
@@ -517,7 +517,7 @@ func testFanoutSubscription(t *testing.T, cfg brokerTestConfig) {
 	}
 }
 
-// TestRabbitMQFanoutSubscription tests that two subscribers with different subscriptionIds each get all messages
+// TestRabbitMQFanoutSubscription tests that two subscribers with different subscriptionIDs each get all messages
 func TestRabbitMQFanoutSubscription(t *testing.T) {
 	testFanoutSubscription(t, brokerTestConfig{
 		brokerType:     "rabbitmq",
@@ -526,7 +526,7 @@ func TestRabbitMQFanoutSubscription(t *testing.T) {
 	})
 }
 
-// TestGooglePubSubFanoutSubscription tests that two subscribers with different subscriptionIds each get all messages
+// TestGooglePubSubFanoutSubscription tests that two subscribers with different subscriptionIDs each get all messages
 func TestGooglePubSubFanoutSubscription(t *testing.T) {
 	testFanoutSubscription(t, brokerTestConfig{
 		brokerType:     "googlepubsub",
@@ -696,11 +696,11 @@ func TestRabbitMQSlowSubscriber(t *testing.T) {
 		brokerType: "rabbitmq",
 	})
 
-	subscriptionId := "slow-subscription"
-	sub1, err := broker.NewSubscriber(subscriptionId, configMap)
+	subscriptionID := "slow-subscription"
+	sub1, err := broker.NewSubscriber(subscriptionID, configMap)
 	require.NoError(t, err)
 
-	sub2, err := broker.NewSubscriber(subscriptionId, configMap)
+	sub2, err := broker.NewSubscriber(subscriptionID, configMap)
 	require.NoError(t, err)
 
 	testSlowSubscriber(t, configMap, brokerTestConfig{
@@ -722,15 +722,15 @@ func TestGooglePubSubSlowSubscriber(t *testing.T) {
 		},
 	})
 
-	// Create two subscribers with the same subscriptionId (shared subscription)
+	// Create two subscribers with the same subscriptionID (shared subscription)
 	// but with different num_goroutines to simulate fast vs slow
-	subscriptionId := "slow-subscription"
+	subscriptionID := "slow-subscription"
 	configMap["broker.googlepubsub.num_goroutines"] = "5"
-	sub1, err := broker.NewSubscriber(subscriptionId, configMap)
+	sub1, err := broker.NewSubscriber(subscriptionID, configMap)
 	require.NoError(t, err)
 
 	configMap["broker.googlepubsub.num_goroutines"] = "1"
-	sub2, err := broker.NewSubscriber(subscriptionId, configMap)
+	sub2, err := broker.NewSubscriber(subscriptionID, configMap)
 	require.NoError(t, err)
 
 	// Note: Google Pub/Sub uses 500ms delay in slow handler, but we'll keep 100ms
@@ -754,13 +754,13 @@ func testErrorSubscriber(t *testing.T, cfg brokerTestConfig) {
 	require.NoError(t, err)
 	defer pub.Close()
 
-	// Create two subscribers with the same subscriptionId (shared subscription)
-	subscriptionId := "error-subscription"
-	sub1, err := broker.NewSubscriber(subscriptionId, configMap)
+	// Create two subscribers with the same subscriptionID (shared subscription)
+	subscriptionID := "error-subscription"
+	sub1, err := broker.NewSubscriber(subscriptionID, configMap)
 	require.NoError(t, err)
 	defer sub1.Close()
 
-	sub2, err := broker.NewSubscriber(subscriptionId, configMap)
+	sub2, err := broker.NewSubscriber(subscriptionID, configMap)
 	require.NoError(t, err)
 	defer sub2.Close()
 
@@ -851,8 +851,8 @@ func testCloseWaitsForInFlightMessages(t *testing.T, cfg brokerTestConfig) {
 	require.NoError(t, err)
 	defer pub.Close()
 
-	subscriptionId := "close-test-subscription"
-	sub, err := broker.NewSubscriber(subscriptionId, configMap)
+	subscriptionID := "close-test-subscription"
+	sub, err := broker.NewSubscriber(subscriptionID, configMap)
 	require.NoError(t, err)
 
 	// Publish 5 messages
@@ -964,8 +964,8 @@ func testPanicHandler(t *testing.T, cfg brokerTestConfig) {
 	require.NoError(t, err)
 	defer pub.Close()
 
-	subscriptionId := "panic-test-subscription"
-	sub, err := broker.NewSubscriber(subscriptionId, configMap)
+	subscriptionID := "panic-test-subscription"
+	sub, err := broker.NewSubscriber(subscriptionID, configMap)
 	require.NoError(t, err)
 
 	// Track how many times the handler was called (before panic)
