@@ -174,6 +174,14 @@ log_config: false  # Set to true to log full configuration on startup
 
 ### Configuration Options
 
+#### `subscriber.parallelism` (int, default: 10`)
+
+The number of goroutines that the subscriber will create and also the value for the broker setting that manages the number of "in flight messages" that haven't been acknowledged.
+
+This allows the subscriber to process multiple messages in parallel.
+
+E.g. in RabbitMQ this sets the `PrefetchCount` parameter for the topic.
+
 #### `log_config` (boolean, default: `false`)
 
 When enabled, the library will log the complete configuration (as JSON) when creating a Publisher or Subscriber. This is useful for:
