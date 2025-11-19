@@ -138,8 +138,7 @@ func testGoroutineLeak(t *testing.T, cfg brokerTestConfig) {
 	require.NoError(t, err)
 
 	// Clean up environment
-	runtime.GC()
-	time.Sleep(50 * time.Millisecond)
+	waitForGC()
 
 	before := runtime.NumGoroutine()
 	t.Logf("📊 Goroutines BEFORE: %d", before)
@@ -202,10 +201,11 @@ func testGoroutineLeak(t *testing.T, cfg brokerTestConfig) {
 	err = sub.Close()
 	require.NoError(t, err)
 
-	// Wait for cleanup (if any)
-	time.Sleep(300 * time.Millisecond)
-	runtime.GC()
-	time.Sleep(50 * time.Millisecond)
+	t.Log("🛑 Calling Close() on publisher...")
+	err = pub.Close()
+	require.NoError(t, err, "Failed to close publisher")
+
+	waitForGC()
 
 	after := runtime.NumGoroutine()
 	leaked := after - before
@@ -240,6 +240,14 @@ func testGoroutineLeak(t *testing.T, cfg brokerTestConfig) {
 	} else {
 		t.Logf("✅ OK: Only %d goroutines remaining (acceptable)", leaked)
 	}
+}
+
+func waitForGC() {
+	time.Sleep(300 * time.Millisecond)
+	runtime.GC()
+	time.Sleep(50 * time.Millisecond)
+	runtime.GC()
+	time.Sleep(50 * time.Millisecond)
 }
 
 // TestRabbitMQGoroutineLeak tests goroutine leak with RabbitMQ
@@ -279,8 +287,7 @@ func testLeakIncreasesWithUsage(t *testing.T, cfg brokerTestConfig) {
 
 	for _, tc := range testCases {
 		t.Run(fmt.Sprintf("%d_subscriptions", tc.numSubscriptions), func(t *testing.T) {
-			runtime.GC()
-			time.Sleep(50 * time.Millisecond)
+			waitForGC()
 			before := runtime.NumGoroutine()
 
 			configMap := setupBrokerTest(t, cfg)
@@ -300,9 +307,7 @@ func testLeakIncreasesWithUsage(t *testing.T, cfg brokerTestConfig) {
 
 			// Close
 			sub.Close()
-			time.Sleep(300 * time.Millisecond)
-			runtime.GC()
-			time.Sleep(50 * time.Millisecond)
+			waitForGC()
 
 			after := runtime.NumGoroutine()
 			leaked := after - before
@@ -343,9 +348,7 @@ func testMultipleSubscriptionsSameTopic(t *testing.T, cfg brokerTestConfig) {
 
 	configMap := setupBrokerTest(t, cfg)
 
-	// Clean up environment
-	runtime.GC()
-	time.Sleep(50 * time.Millisecond)
+	waitForGC()
 
 	before := runtime.NumGoroutine()
 	t.Logf("📊 Goroutines BEFORE: %d", before)
@@ -422,9 +425,7 @@ func testMultipleSubscriptionsSameTopic(t *testing.T, cfg brokerTestConfig) {
 	require.NoError(t, err, "Failed to close publisher")
 
 	// Wait for cleanup
-	time.Sleep(300 * time.Millisecond)
-	runtime.GC()
-	time.Sleep(50 * time.Millisecond)
+	waitForGC()
 
 	after := runtime.NumGoroutine()
 	leaked := after - before

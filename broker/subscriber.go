@@ -3,11 +3,11 @@ package broker
 import (
 	"context"
 	"fmt"
-	"runtime/debug"
 	"sync"
 
 	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill/message"
+	"github.com/ThreeDotsLabs/watermill/message/router/middleware"
 	"github.com/cloudevents/sdk-go/v2/event"
 )
 
@@ -39,97 +39,61 @@ func (s *subscriber) Subscribe(ctx context.Context, topic string, handler Handle
 		return fmt.Errorf("handler must be provided")
 	}
 
-	// Subscribe to the original topic name
-	// The subscription ID is handled by the broker-specific configuration:
-	// - RabbitMQ: Queue name generator uses subscription ID
-	// - Google Pub/Sub: Subscription name generator uses subscription ID
-	// This ensures publishers and subscribers use the same topic/exchange name
-	messages, err := s.sub.Subscribe(ctx, topic)
+	// Create a new router for this subscription
+	router, err := message.NewRouter(message.RouterConfig{}, s.logger)
 	if err != nil {
-		return fmt.Errorf("failed to subscribe to topic %s: %w", topic, err)
+		return fmt.Errorf("failed to create router: %w", err)
 	}
 
-	// Create a channel to distribute messages to workers
-	messageChan := make(chan *message.Message, s.parallelism)
+	// Add standard middleware
+	router.AddMiddleware(
+		middleware.Recoverer,
+	)
 
-	// Start worker pool
-	//var wg sync.WaitGroup
-	for i := 0; i < s.parallelism; i++ {
-		s.wg.Go(func() {
-			s.worker(ctx, messageChan, handler)
-		})
-	}
-
-	// Distribute messages to workers
-	go func() {
-		defer close(messageChan)
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case msg, ok := <-messages:
-				if !ok {
-					return
-				}
-				select {
-				case messageChan <- msg:
-				case <-ctx.Done():
-					return
-				}
-			}
+	// Create the Watermill handler function
+	h := func(msg *message.Message) error {
+		// Convert Watermill message to CloudEvent
+		evt, err := messageToEvent(msg)
+		if err != nil {
+			// If conversion fails, we return error which triggers Nack/Retry
+			// If it's a permanent error (malformed), Retry middleware will give up after MaxRetries
+			// and message will be Nacked (or sent to PoisonQueue if configured, but here just Nacked)
+			return fmt.Errorf("failed to convert message to CloudEvent: %w", err)
 		}
-	}()
+
+		// Process the event with the handler
+		// IMPORTANT: Pass msg.Context() to preserve tracing/metadata
+		return handler(msg.Context(), evt)
+	}
+
+	// Register handler multiple times to achieve parallelism
+	// Watermill Router processes each handler in a separate goroutine
+	for i := 0; i < s.parallelism; i++ {
+		handlerName := fmt.Sprintf("%s-%d", topic, i)
+		router.AddConsumerHandler(
+			handlerName,
+			topic,
+			s.sub,
+			h,
+		)
+	}
+
+	// Run the router in the background
+	s.wg.Go(func() {
+		if err := router.Run(ctx); err != nil {
+			s.logger.Error("Router stopped with error", err, watermill.LogFields{
+				"topic":           topic,
+				"subscription_id": s.subscriptionID,
+			})
+		}
+	})
 
 	return nil
 }
 
-// worker processes messages from the message channel
-func (s *subscriber) worker(ctx context.Context, messages <-chan *message.Message, handler HandlerFunc) {
-	defer func() {
-		if r := recover(); r != nil {
-			s.logger.Error("Worker panicked - recovered",
-				fmt.Errorf("panic: %v", r), watermill.LogFields{
-					"subscription_id": s.subscriptionID,
-					"stack":           string(debug.Stack()),
-				})
-		}
-	}()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case msg, ok := <-messages:
-			if !ok {
-				return
-			}
-
-			// Convert Watermill message to CloudEvent
-			evt, err := messageToEvent(msg)
-			if err != nil {
-				s.logger.Error("Error converting message to CloudEvent", err, watermill.LogFields{
-					"uuid":            msg.UUID,
-					"subscription_id": s.subscriptionID,
-					"message":         msg.Payload,
-					"metadata":        msg.Metadata,
-				})
-				msg.Nack()
-				continue
-			}
-
-			// Process the event with the handler
-			if err := handler(ctx, evt); err != nil {
-				msg.Nack()
-				continue
-			}
-
-			// Acknowledge the message
-			msg.Ack()
-		}
-	}
-}
-
 // Close closes the underlying subscriber
 func (s *subscriber) Close() error {
+	// Closing the subscriber will stop all routers receiving messages
 	err := s.sub.Close()
 	if err != nil {
 		return err

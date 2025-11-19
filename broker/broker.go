@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	DefaultSubscriberParallelism = 10
+	DefaultSubscriberParallelism = 1
 	DefaultTestParallelism       = 1
 	DefaultShutdownTimeout       = 30 * time.Second
 )

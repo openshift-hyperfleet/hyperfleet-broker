@@ -2,16 +2,21 @@ package main
 
 import (
 	"context"
+	"flag"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/cloudevents/sdk-go/v2/event"
 	"github.com/openshift-hyperfleet/hyperfleet-broker/broker"
 )
 
 func main() {
+	processTime := flag.Duration("process-time", 2*time.Second, "Time to simulate message processing")
+	flag.Parse()
+
 	// Get subscriber instance ID from environment variable (defaults to "1")
 	instanceID := os.Getenv("SUBSCRIBER_INSTANCE_ID")
 	if instanceID == "" {
@@ -45,6 +50,9 @@ func main() {
 			log.Printf("[Subscriber %s] Event data: %+v", instanceID, data)
 		}
 
+		time.Sleep(*processTime)
+		log.Printf("[Subscriber %s] Processed event - ID: %s, Type: %s, Source: %s",
+			instanceID, evt.ID(), evt.Type(), evt.Source())
 		return nil
 	}
 

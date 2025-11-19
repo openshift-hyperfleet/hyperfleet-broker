@@ -1,9 +1,9 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
-	"os"
 	"time"
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
@@ -12,6 +12,9 @@ import (
 )
 
 func main() {
+	interval := flag.Duration("interval", 20*time.Millisecond, "Interval between publishing events")
+	flag.Parse()
+
 	// Create publisher
 	publisher, err := broker.NewPublisher()
 	if err != nil {
@@ -21,15 +24,15 @@ func main() {
 
 	topic := "example-topic"
 	// Get topic from command line argument
-	if len(os.Args) > 1 {
-		topic = os.Args[1]
+	if flag.NArg() > 0 {
+		topic = flag.Arg(0)
 	}
 
-	log.Printf("Publisher started. Publishing events to topic: %s", topic)
+	log.Printf("Publisher started. Publishing events to topic: %s with interval: %v", topic, *interval)
 	log.Printf("Press Ctrl+C to stop...")
 
-	// Publish events every 2 seconds
-	ticker := time.NewTicker(2 * time.Second)
+	// Publish events
+	ticker := time.NewTicker(*interval)
 	defer ticker.Stop()
 
 	counter := 0

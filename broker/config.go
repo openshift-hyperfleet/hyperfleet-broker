@@ -89,7 +89,7 @@ func loadConfig() (*config, error) {
 
 	// Set defaults
 	v.SetDefault("log_config", false)
-	v.SetDefault("subscriber.parallelism", 10)
+	v.SetDefault("subscriber.parallelism", DefaultSubscriberParallelism)
 
 	// Read config file (optional - will use defaults if not found)
 	if err := v.ReadInConfig(); err != nil {

@@ -75,11 +75,7 @@ func newRabbitMQSubscriber(cfg *config, logger watermill.LoggerAdapter, subscrip
 	if cfg.Broker.RabbitMQ.PrefetchCount > 0 {
 		amqpConfig.Consume.Qos.PrefetchCount = cfg.Broker.RabbitMQ.PrefetchCount
 	}
-	if cfg.Subscriber.Parallelism > 0 {
-		amqpConfig.Consume.Qos.PrefetchCount = cfg.Subscriber.Parallelism
-	}
-	/*
-	 */
+
 	if cfg.Broker.RabbitMQ.PrefetchSize > 0 {
 		amqpConfig.Consume.Qos.PrefetchSize = cfg.Broker.RabbitMQ.PrefetchSize
 	}

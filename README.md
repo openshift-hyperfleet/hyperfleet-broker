@@ -168,7 +168,7 @@ broker:
 
 # Subscriber Configuration
 subscriber:
-  parallelism: 10  # Number of parallel workers
+  parallelism: 10  # Number of parallel subcription 
 
 # Debugging: Enable configuration logging
 log_config: false  # Set to true to log full configuration on startup
@@ -178,19 +178,52 @@ log_config: false  # Set to true to log full configuration on startup
 
 ### Configuration Options
 
-#### `subscriber.parallelism` (int, default: 10`)
 
-The number of goroutines that the subscriber will create and also the value for the broker setting that manages the number of "in flight messages" that haven't been acknowledged.
+### Message processing parallelism
 
-This allows the subscriber to process multiple messages in parallel.
+Message processing parallelism is controlled by a combination of a **broker-agnostic worker pool** and **broker-specific pull settings**.
 
-E.g. in RabbitMQ this sets the `PrefetchCount` parameter for the topic.
+The key concept for parallel processing is allowing a certain number of "in flight" messages from the broker. This means that the broker will not wait for a message to be acknoledge to deliver the next one, up to the specified number of allowed unacknowledge messages. This setting is specific per broker, and the library does not try to hide this settings from the user to make looking for help easier in case of errors.
 
-⚠️ Note: parallelism does not work properly with RabbitMQ. The watermill implementation of the subscriber uses a single goroutine that blocks until a received message is ack/nack.
-The best way to deal with this is to use `subscriber.Subscribe()` as many times as the desired parallelism
-This can be followed up in this library issue. https://github.com/ThreeDotsLabs/watermill/issues/586
+After setting the maximun number of allowed "in flight" messages, further settings are used to specify the number of parallel processes handling these messages.
 
+- **Global worker pool (`subscriber.parallelism`)**
+  - This setting is needed for watermil's implementations that do not implement their own worker pool (currently RabbitMQ)
+  - Controls how many **independent workers** are created per subscriber.
+  - Each worker runs the handler in its own goroutine, allowing multiple messages to be processed at the same time.
+  - Default value is **1** if not set.
+  - Can be configured in YAML or via environment variable:
+    - YAML:
+      ```yaml
+      subscriber:
+        parallelism: 1
+      ```
+    - Env:
+      ```bash
+      export SUBSCRIBER_PARALLELISM=1
+      ```
 
+- **RabbitMQ-specific options**
+  - **`broker.rabbitmq.prefetch_count`**:
+    - Maximum number of unacknowledged messages that RabbitMQ will deliver **per consumer**.
+    - Higher values increase throughput but also increase the number of in-flight messages and memory usage.
+    - `0` means “no limit” (RabbitMQ can send as many messages as possible to each worker).
+  - **`broker.rabbitmq.prefetch_size`**:
+    - Byte-based limit for unacknowledged messages per consumer.
+    - `0` means “no limit”; in most cases you will only tune `prefetch_count` and leave this at `0`.
+  - Combined with `subscriber.parallelism`, the effective concurrency is roughly:
+    - max in-flight messages ≈ `subscriber.parallelism` × `prefetch_count`
+    - Example: `parallelism=5` and `prefetch_count=20` → up to ~100 messages in flight for that subscriber.
+
+- **Google Pub/Sub-specific options**
+  - ⚠️ Please note that watermill's PubSub subscriber implementation already provides a way to process messages in parallel. So there is no need to increase `subscriber.parallelism`
+  - **`broker.googlepubsub.max_outstanding_messages`**:
+    - Upper bound on the total number of messages being processed at once by the subscriber.
+    - Acts as a backpressure mechanism; when the limit is reached, the client stops pulling new messages until some are acked.
+  - **`broker.googlepubsub.num_goroutines`**:
+    - Number of internal goroutines used by the Pub/Sub client to pull and dispatch messages.
+    - Higher values can increase throughput on busy topics but also increase load on the broker and your application.
+  - Together with `subscriber.parallelism`, these settings determine how many messages can be **pulled and processed concurrently** for each subscription.
 
 #### `log_config` (boolean, default: `false`)
 
@@ -415,3 +448,27 @@ If executing tests from vscode, you can specify this in your `settings.json` for
     ]
 }
 ```
+
+# Running RabbitMQ and PubSub emulator in containers
+
+These commands can be used to run containerized versions of RabbitMQ and Google's PubSub emulator
+
+### RabbitMQ
+
+This exposes the administrative UI at http://localhost:8080
+
+```
+podman run -d --hostname my-rabbit --name some-rabbit -p 5672:5672 -p 8080:15672 rabbitmq:3-management
+```
+
+### Google PubSub emulator
+
+Using the emulator also requires to set some environment variables for the Google golang Driver to use it
+
+```
+export PUBSUB_PROJECT_ID=htc-hyperfleet
+export PUBSUB_EMULATOR_HOST=localhost:8085
+
+podman run --rm --name pubsub-emulator -d -p 8085:8085 google/cloud-sdk:emulators /bin/bash -c "gcloud beta emulators pubsub start --project=hcm-hyperfleet --host-port='0.0.0.0:8085'"
+```
+
