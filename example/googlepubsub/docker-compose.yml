@@ -1,0 +1,66 @@
+services:
+  pubsub-emulator:
+    image: gcr.io/google.com/cloudsdktool/cloud-sdk:emulators
+    container_name: broker-example-pubsub-emulator
+    ports:
+      - "8085:8085" # Pub/Sub emulator port
+    command: >
+      gcloud beta emulators pubsub start
+      --host-port=0.0.0.0:8085
+      --project=example-project
+    environment:
+      PUBSUB_EMULATOR_HOST: 0.0.0.0:8085
+      PUBSUB_PROJECT_ID: example-project
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8085"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  publisher:
+    build:
+      context: ../..
+      dockerfile: example/Dockerfile
+    container_name: broker-example-publisher
+    depends_on:
+      pubsub-emulator:
+        condition: service_healthy
+    environment:
+      PUBSUB_EMULATOR_HOST: pubsub-emulator:8085
+    volumes:
+      - ./broker.yaml:/app/broker.yaml:ro
+    command: ["./publisher"]
+    restart: unless-stopped
+
+  subscriber1:
+    build:
+      context: ../..
+      dockerfile: example/Dockerfile
+    container_name: broker-example-subscriber1
+    depends_on:
+      pubsub-emulator:
+        condition: service_healthy
+    environment:
+      SUBSCRIBER_INSTANCE_ID: "1"
+      PUBSUB_EMULATOR_HOST: pubsub-emulator:8085
+    volumes:
+      - ./broker.yaml:/app/broker.yaml:ro
+    command: ["./subscriber"]
+    restart: unless-stopped
+
+  subscriber2:
+    build:
+      context: ../..
+      dockerfile: example/Dockerfile
+    container_name: broker-example-subscriber2
+    depends_on:
+      pubsub-emulator:
+        condition: service_healthy
+    environment:
+      SUBSCRIBER_INSTANCE_ID: "2"
+      PUBSUB_EMULATOR_HOST: pubsub-emulator:8085
+    volumes:
+      - ./broker.yaml:/app/broker.yaml:ro
+    command: ["./subscriber"]
+    restart: unless-stopped
+

@@ -1,0 +1,9 @@
+broker:
+  type: googlepubsub
+  googlepubsub:
+    project_id: example-project
+
+subscriber:
+  parallelism: 10
+
+
