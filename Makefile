@@ -11,3 +11,8 @@ test-integration:
 # Run all tests
 test-all: test-unit test-integration
 
+.PHONY: lint
+lint: ## Run golangci-lint (requires golangci-lint to be installed)
+	golangci-lint run
+
+

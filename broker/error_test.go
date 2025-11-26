@@ -327,10 +327,6 @@ func TestBuildConfigFromMapErrorHandling(t *testing.T) {
 				assert.Nil(t, cfg)
 			} else {
 				// buildConfigFromMap should handle nil/empty maps gracefully
-				if tt.configMap == nil {
-					// For nil, it might return an error or handle it
-					// Let's see what happens
-				}
 				// For empty map, it should return default config
 				if len(tt.configMap) == 0 {
 					assert.NoError(t, err)

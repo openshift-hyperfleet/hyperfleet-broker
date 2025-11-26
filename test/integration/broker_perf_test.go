@@ -71,15 +71,15 @@ func TestRabbitMQPerformance(t *testing.T) {
 
 	// Set up handlers
 	handler1 := func(ctx context.Context, e *event.Event) error {
-		//time.Sleep(1000 * time.Millisecond)
-		//t.Logf("Subscriber 1 received message %s - %d", e.ID(), sub1Received)
+		// time.Sleep(1000 * time.Millisecond)
+		// t.Logf("Subscriber 1 received message %s - %d", e.ID(), sub1Received)
 		atomic.AddInt64(&sub1Received, 1)
 		return nil
 	}
 
 	handler2 := func(ctx context.Context, e *event.Event) error {
-		//time.Sleep(10 * time.Millisecond)
-		//t.Logf("Subscriber 2 received message %s - %d", e.ID(), sub2Received)
+		// time.Sleep(10 * time.Millisecond)
+		// t.Logf("Subscriber 2 received message %s - %d", e.ID(), sub2Received)
 		atomic.AddInt64(&sub2Received, 1)
 		return nil
 	}
@@ -107,7 +107,7 @@ func TestRabbitMQPerformance(t *testing.T) {
 			evt.SetType("com.example.performance.event")
 			evt.SetSource("perf-source")
 			evt.SetID(fmt.Sprintf("perf-id-%d", atomic.AddInt64(&eventID, 1)))
-			evt.SetData(event.ApplicationJSON, map[string]interface{}{
+			_ = evt.SetData(event.ApplicationJSON, map[string]interface{}{
 				"timestamp": time.Now().UnixNano(),
 				"id":        eventID,
 			})
@@ -176,7 +176,7 @@ func TestGooglePubSubPerformance(t *testing.T) {
 	projectID, _ := setupPubSubEmulator(t)
 	configMap := buildConfigMap("googlepubsub", "", projectID)
 
-	//configMap["broker.googlepubsub.max_outstanding_messages"] = "10"
+	// configMap["broker.googlepubsub.max_outstanding_messages"] = "10"
 	// Set NumGoroutines to 1 to use a single streaming pull stream
 	configMap["subscriber.parallelism"] = "10"
 	configMap["broker.googlepubsub.num_goroutines"] = "10"
@@ -203,15 +203,15 @@ func TestGooglePubSubPerformance(t *testing.T) {
 
 	// Set up handlers
 	handler1 := func(ctx context.Context, e *event.Event) error {
-		//time.Sleep(1000 * time.Millisecond)
-		//t.Logf("Subscriber 1 received message %s - %d", e.ID(), sub1Received)
+		// time.Sleep(1000 * time.Millisecond)
+		// t.Logf("Subscriber 1 received message %s - %d", e.ID(), sub1Received)
 		atomic.AddInt64(&sub1Received, 1)
 		return nil
 	}
 
 	handler2 := func(ctx context.Context, e *event.Event) error {
-		//time.Sleep(1000 * time.Millisecond)
-		//t.Logf("Subscriber 2 received message %s - %d", e.ID(), sub2Received)
+		// time.Sleep(1000 * time.Millisecond)
+		// t.Logf("Subscriber 2 received message %s - %d", e.ID(), sub2Received)
 		atomic.AddInt64(&sub2Received, 1)
 		return nil
 	}
@@ -227,7 +227,7 @@ func TestGooglePubSubPerformance(t *testing.T) {
 	time.Sleep(2 * time.Second)
 
 	// Run test for at least 1 minute
-	//testDuration := 1 * time.Minute
+	// testDuration := 1 * time.Minute
 	testDuration := 10 * time.Second
 	startTime := time.Now()
 	endTime := startTime.Add(testDuration)
@@ -242,7 +242,7 @@ func TestGooglePubSubPerformance(t *testing.T) {
 			evt.SetType("com.example.performance.event")
 			evt.SetSource("perf-source")
 			evt.SetID(fmt.Sprintf("perf-id-%d", atomic.AddInt64(&eventID, 1)))
-			evt.SetData(event.ApplicationJSON, map[string]interface{}{
+			_ = evt.SetData(event.ApplicationJSON, map[string]interface{}{
 				"timestamp": time.Now().UnixNano(),
 				"id":        eventID,
 			})
@@ -325,7 +325,7 @@ func writeResults(t *testing.T, result PerformanceTestResult) {
 	data, err := json.MarshalIndent(results, "", "  ")
 	require.NoError(t, err)
 
-	err = os.WriteFile(filePath, data, 0644)
+	err = os.WriteFile(filePath, data, 0o644)
 	require.NoError(t, err)
 
 	t.Logf("Results written to %s", filePath)

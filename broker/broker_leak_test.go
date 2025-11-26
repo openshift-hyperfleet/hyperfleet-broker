@@ -21,8 +21,8 @@ import (
 func setupRabbitMQContainer(t *testing.T) string {
 	ctx := context.Background()
 
-	rabbitmqContainer, err := rabbitmq.RunContainer(ctx,
-		testcontainers.WithImage("rabbitmq:3"),
+	rabbitmqContainer, err := rabbitmq.Run(ctx,
+		"rabbitmq:3",
 		rabbitmq.WithAdminUsername("guest"),
 		rabbitmq.WithAdminPassword("guest"),
 		testcontainers.WithWaitStrategy(
@@ -168,7 +168,7 @@ func testGoroutineLeak(t *testing.T, cfg brokerTestConfig) {
 		evt.SetType("com.example.test.event")
 		evt.SetSource("test-source")
 		evt.SetID(fmt.Sprintf("error-id-%d", i))
-		evt.SetData(event.ApplicationJSON, map[string]int{"index": i})
+		_ = evt.SetData(event.ApplicationJSON, map[string]int{"index": i})
 
 		err = pub.Publish("topic-"+strconv.Itoa(i), &evt)
 		require.NoError(t, err)
@@ -299,7 +299,7 @@ func testLeakIncreasesWithUsage(t *testing.T, cfg brokerTestConfig) {
 
 			// Subscribe N times
 			for i := 0; i < tc.numSubscriptions; i++ {
-				sub.Subscribe(ctx, fmt.Sprintf("topic-%d", i), handler)
+				_ = sub.Subscribe(ctx, fmt.Sprintf("topic-%d", i), handler)
 			}
 			time.Sleep(cfg.setupSleep)
 
@@ -406,7 +406,7 @@ func testMultipleSubscriptionsSameTopic(t *testing.T, cfg brokerTestConfig) {
 		evt.SetType("com.example.test.event")
 		evt.SetSource("test-source")
 		evt.SetID(fmt.Sprintf("msg-id-%d", i))
-		evt.SetData(event.ApplicationJSON, map[string]int{"index": i})
+		_ = evt.SetData(event.ApplicationJSON, map[string]int{"index": i})
 
 		err = pub.Publish(sameTopic, &evt)
 		require.NoError(t, err)

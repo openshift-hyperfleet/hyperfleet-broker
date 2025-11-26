@@ -52,8 +52,8 @@ func TestMain(m *testing.M) {
 func setupRabbitMQContainer(t *testing.T) string {
 	ctx := context.Background()
 
-	rabbitmqContainer, err := rabbitmq.RunContainer(ctx,
-		testcontainers.WithImage("rabbitmq:3-management-alpine"),
+	rabbitmqContainer, err := rabbitmq.Run(ctx,
+		"rabbitmq:3-management-alpine",
 		rabbitmq.WithAdminUsername("guest"),
 		rabbitmq.WithAdminPassword("guest"),
 		testcontainers.WithWaitStrategy(
@@ -189,7 +189,7 @@ func testPublisherSubscriber(t *testing.T, cfg brokerTestConfig) {
 	evt.SetType("com.example.test.event")
 	evt.SetSource("test-source")
 	evt.SetID("test-id-123")
-	evt.SetData(event.ApplicationJSON, map[string]string{
+	_ = evt.SetData(event.ApplicationJSON, map[string]string{
 		"message": "Hello, World!",
 	})
 
@@ -258,13 +258,13 @@ func testMultipleEvents(t *testing.T, cfg brokerTestConfig) {
 	evt1.SetType("com.example.event.type1")
 	evt1.SetSource("test-source")
 	evt1.SetID("id-1")
-	evt1.SetData(event.ApplicationJSON, map[string]string{"type": "1"})
+	_ = evt1.SetData(event.ApplicationJSON, map[string]string{"type": "1"})
 
 	evt2 := event.New()
 	evt2.SetType("com.example.event.type2")
 	evt2.SetSource("test-source")
 	evt2.SetID("id-2")
-	evt2.SetData(event.ApplicationJSON, map[string]string{"type": "2"})
+	_ = evt2.SetData(event.ApplicationJSON, map[string]string{"type": "2"})
 
 	// Set up handler to collect all events
 	receivedEvents := make(chan *event.Event, 2)
@@ -369,7 +369,7 @@ func testSharedSubscription(t *testing.T, cfg brokerTestConfig) {
 		evt.SetType("com.example.test.event")
 		evt.SetSource("test-source")
 		evt.SetID(fmt.Sprintf("id-%d", i))
-		evt.SetData(event.ApplicationJSON, map[string]int{"index": i})
+		_ = evt.SetData(event.ApplicationJSON, map[string]int{"index": i})
 
 		err = pub.Publish("shared-topic", &evt)
 		require.NoError(t, err)
@@ -475,7 +475,7 @@ func testFanoutSubscription(t *testing.T, cfg brokerTestConfig) {
 		evt.SetSource("test-source")
 		evt.SetID(fmt.Sprintf("fanout-id-%d", i))
 		messageIDs[i] = evt.ID()
-		evt.SetData(event.ApplicationJSON, map[string]int{"index": i})
+		_ = evt.SetData(event.ApplicationJSON, map[string]int{"index": i})
 
 		err = pub.Publish("fanout-topic", &evt)
 		require.NoError(t, err)
@@ -558,7 +558,7 @@ func TestRabbitMQSubscriptionID(t *testing.T) {
 	evt.SetType("com.example.test.event")
 	evt.SetSource("test-source")
 	evt.SetID("test-id")
-	evt.SetData(event.ApplicationJSON, map[string]string{"message": "test"})
+	_ = evt.SetData(event.ApplicationJSON, map[string]string{"message": "test"})
 
 	// Both subscribers should receive the event (fanout behavior)
 	received1 := make(chan *event.Event, 1)
@@ -647,7 +647,7 @@ func testSlowSubscriber(t *testing.T, configMap map[string]string, cfg brokerTes
 		evt.SetType("com.example.test.event")
 		evt.SetSource("test-source")
 		evt.SetID(fmt.Sprintf("slow-id-%d", i))
-		evt.SetData(event.ApplicationJSON, map[string]int{"index": i})
+		_ = evt.SetData(event.ApplicationJSON, map[string]int{"index": i})
 
 		err = pub.Publish("slow-topic", &evt)
 		require.NoError(t, err)
@@ -796,7 +796,7 @@ func testErrorSubscriber(t *testing.T, cfg brokerTestConfig) {
 		evt.SetType("com.example.test.event")
 		evt.SetSource("test-source")
 		evt.SetID(fmt.Sprintf("error-id-%d", i))
-		evt.SetData(event.ApplicationJSON, map[string]int{"index": i})
+		_ = evt.SetData(event.ApplicationJSON, map[string]int{"index": i})
 
 		err = pub.Publish("error-topic", &evt)
 		require.NoError(t, err)
@@ -884,7 +884,7 @@ func testCloseWaitsForInFlightMessages(t *testing.T, cfg brokerTestConfig) {
 		evt.SetType("com.example.test.event")
 		evt.SetSource("test-source")
 		evt.SetID(fmt.Sprintf("close-test-id-%d", i))
-		evt.SetData(event.ApplicationJSON, map[string]int{"index": i})
+		_ = evt.SetData(event.ApplicationJSON, map[string]int{"index": i})
 
 		err = pub.Publish("close-test-topic", &evt)
 
@@ -994,7 +994,7 @@ func testPanicHandler(t *testing.T, cfg brokerTestConfig) {
 		evt.SetType("com.example.test.event")
 		evt.SetSource("test-source")
 		evt.SetID(fmt.Sprintf("panic-test-id-%d", i))
-		evt.SetData(event.ApplicationJSON, map[string]int{"index": i})
+		_ = evt.SetData(event.ApplicationJSON, map[string]int{"index": i})
 
 		err = pub.Publish("panic-test-topic", &evt)
 		require.NoError(t, err)
