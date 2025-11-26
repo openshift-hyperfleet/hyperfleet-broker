@@ -21,8 +21,8 @@ import (
 func setupRabbitMQContainer(t *testing.T) string {
 	ctx := context.Background()
 
-	rabbitmqContainer, err := rabbitmq.RunContainer(ctx,
-		testcontainers.WithImage("rabbitmq:3"),
+	rabbitmqContainer, err := rabbitmq.Run(ctx,
+		"rabbitmq:3",
 		rabbitmq.WithAdminUsername("guest"),
 		rabbitmq.WithAdminPassword("guest"),
 		testcontainers.WithWaitStrategy(
@@ -81,9 +81,13 @@ func setupPubSubEmulator(t *testing.T) (string, string) {
 	emulatorHost := fmt.Sprintf("%s:%s", host, mappedPort.Port())
 
 	// Set environment variable for Pub/Sub emulator
-	os.Setenv("PUBSUB_EMULATOR_HOST", emulatorHost)
+	if err := os.Setenv("PUBSUB_EMULATOR_HOST", emulatorHost); err != nil {
+		t.Fatalf("failed to set PUBSUB_EMULATOR_HOST: %v", err)
+	}
 	t.Cleanup(func() {
-		os.Unsetenv("PUBSUB_EMULATOR_HOST")
+		if err := os.Unsetenv("PUBSUB_EMULATOR_HOST"); err != nil {
+			t.Logf("failed to unset PUBSUB_EMULATOR_HOST: %v", err)
+		}
 	})
 
 	return projectID, emulatorHost
@@ -95,9 +99,10 @@ func buildConfigMap(brokerType string, rabbitMQURL string, pubsubProjectID strin
 		"subscriber.parallelism": "1",
 	}
 
-	if brokerType == "rabbitmq" {
+	switch brokerType {
+	case "rabbitmq":
 		configMap["broker.rabbitmq.url"] = rabbitMQURL
-	} else if brokerType == "googlepubsub" {
+	case "googlepubsub":
 		configMap["broker.googlepubsub.project_id"] = pubsubProjectID
 	}
 
@@ -168,7 +173,9 @@ func testGoroutineLeak(t *testing.T, cfg brokerTestConfig) {
 		evt.SetType("com.example.test.event")
 		evt.SetSource("test-source")
 		evt.SetID(fmt.Sprintf("error-id-%d", i))
-		evt.SetData(event.ApplicationJSON, map[string]int{"index": i})
+		if err := evt.SetData(event.ApplicationJSON, map[string]int{"index": i}); err != nil {
+			require.NoError(t, err, "failed to set event data")
+		}
 
 		err = pub.Publish("topic-"+strconv.Itoa(i), &evt)
 		require.NoError(t, err)
@@ -299,14 +306,18 @@ func testLeakIncreasesWithUsage(t *testing.T, cfg brokerTestConfig) {
 
 			// Subscribe N times
 			for i := 0; i < tc.numSubscriptions; i++ {
-				sub.Subscribe(ctx, fmt.Sprintf("topic-%d", i), handler)
+				if err := sub.Subscribe(ctx, fmt.Sprintf("topic-%d", i), handler); err != nil {
+					t.Logf("failed to subscribe to topic-%d: %v", i, err)
+				}
 			}
 			time.Sleep(cfg.setupSleep)
 
 			during := runtime.NumGoroutine()
 
 			// Close
-			sub.Close()
+			if err := sub.Close(); err != nil {
+				t.Logf("failed to close subscriber: %v", err)
+			}
 			waitForGC()
 
 			after := runtime.NumGoroutine()
@@ -406,7 +417,9 @@ func testMultipleSubscriptionsSameTopic(t *testing.T, cfg brokerTestConfig) {
 		evt.SetType("com.example.test.event")
 		evt.SetSource("test-source")
 		evt.SetID(fmt.Sprintf("msg-id-%d", i))
-		evt.SetData(event.ApplicationJSON, map[string]int{"index": i})
+		if err := evt.SetData(event.ApplicationJSON, map[string]int{"index": i}); err != nil {
+			require.NoError(t, err, "failed to set event data")
+		}
 
 		err = pub.Publish(sameTopic, &evt)
 		require.NoError(t, err)

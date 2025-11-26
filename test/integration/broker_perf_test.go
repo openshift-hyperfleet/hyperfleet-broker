@@ -51,17 +51,29 @@ func TestRabbitMQPerformance(t *testing.T) {
 	// Create publisher
 	pub, err := broker.NewPublisher(configMap)
 	require.NoError(t, err)
-	defer pub.Close()
+	defer func() {
+		if err := pub.Close(); err != nil {
+			t.Logf("failed to close publisher: %v", err)
+		}
+	}()
 
 	// Create two subscribers with the same subscriptionID (shared subscription)
 	subscriptionID := "perf-subscription"
 	sub1, err := broker.NewSubscriber(subscriptionID, configMap)
 	require.NoError(t, err)
-	defer sub1.Close()
+	defer func() {
+		if err := sub1.Close(); err != nil {
+			t.Logf("failed to close subscriber 1: %v", err)
+		}
+	}()
 
 	sub2, err := broker.NewSubscriber(subscriptionID, configMap)
 	require.NoError(t, err)
-	defer sub2.Close()
+	defer func() {
+		if err := sub2.Close(); err != nil {
+			t.Logf("failed to close subscriber 2: %v", err)
+		}
+	}()
 
 	// Metrics
 	var messagesPublished int64
@@ -107,10 +119,13 @@ func TestRabbitMQPerformance(t *testing.T) {
 			evt.SetType("com.example.performance.event")
 			evt.SetSource("perf-source")
 			evt.SetID(fmt.Sprintf("perf-id-%d", atomic.AddInt64(&eventID, 1)))
-			evt.SetData(event.ApplicationJSON, map[string]interface{}{
+			if err := evt.SetData(event.ApplicationJSON, map[string]interface{}{
 				"timestamp": time.Now().UnixNano(),
 				"id":        eventID,
-			})
+			}); err != nil {
+				t.Logf("Error setting event data: %v", err)
+				continue
+			}
 
 			if err := pub.Publish("perf-topic", &evt); err != nil {
 				t.Logf("Error publishing message: %v", err)
@@ -183,17 +198,29 @@ func TestGooglePubSubPerformance(t *testing.T) {
 	// Create publisher
 	pub, err := broker.NewPublisher(configMap)
 	require.NoError(t, err)
-	defer pub.Close()
+	defer func() {
+		if err := pub.Close(); err != nil {
+			t.Logf("failed to close publisher: %v", err)
+		}
+	}()
 
 	// Create two subscribers with the same subscriptionID (shared subscription)
 	subscriptionID := "perf-subscription"
 	sub1, err := broker.NewSubscriber(subscriptionID, configMap)
 	require.NoError(t, err)
-	defer sub1.Close()
+	defer func() {
+		if err := sub1.Close(); err != nil {
+			t.Logf("failed to close subscriber 1: %v", err)
+		}
+	}()
 
 	sub2, err := broker.NewSubscriber(subscriptionID, configMap)
 	require.NoError(t, err)
-	defer sub2.Close()
+	defer func() {
+		if err := sub2.Close(); err != nil {
+			t.Logf("failed to close subscriber 2: %v", err)
+		}
+	}()
 
 	// Metrics
 	var messagesPublished int64
@@ -242,10 +269,13 @@ func TestGooglePubSubPerformance(t *testing.T) {
 			evt.SetType("com.example.performance.event")
 			evt.SetSource("perf-source")
 			evt.SetID(fmt.Sprintf("perf-id-%d", atomic.AddInt64(&eventID, 1)))
-			evt.SetData(event.ApplicationJSON, map[string]interface{}{
+			if err := evt.SetData(event.ApplicationJSON, map[string]interface{}{
 				"timestamp": time.Now().UnixNano(),
 				"id":        eventID,
-			})
+			}); err != nil {
+				t.Logf("Error setting event data: %v", err)
+				continue
+			}
 
 			if err := pub.Publish("perf-topic", &evt); err != nil {
 				t.Logf("Error publishing message: %v", err)
