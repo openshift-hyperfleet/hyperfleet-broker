@@ -14,6 +14,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/openshift-hyperfleet/hyperfleet-broker/broker"
+	"github.com/openshift-hyperfleet/hyperfleet-broker/test/integration/common"
+	pubsub "github.com/openshift-hyperfleet/hyperfleet-broker/test/integration/googlepubsub"
+	"github.com/openshift-hyperfleet/hyperfleet-broker/test/integration/rabbitmq"
 )
 
 // we keep this short for now to make the tests run faster
@@ -45,8 +48,8 @@ func TestRabbitMQPerformance(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	rabbitMQURL := setupRabbitMQContainer(t)
-	configMap := buildConfigMap("rabbitmq", rabbitMQURL, "")
+	rabbitMQURL := rabbitmq.SetupRabbitMQContainer(t)
+	configMap := common.BuildConfigMap("rabbitmq", rabbitMQURL, "")
 
 	// Create publisher
 	pub, err := broker.NewPublisher(configMap)
@@ -188,8 +191,8 @@ func TestGooglePubSubPerformance(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	projectID, _ := setupPubSubEmulator(t)
-	configMap := buildConfigMap("googlepubsub", "", projectID)
+	projectID, _ := pubsub.SetupPubSubEmulator(t)
+	configMap := common.BuildConfigMap("googlepubsub", "", projectID)
 
 	//configMap["broker.googlepubsub.max_outstanding_messages"] = "10"
 	// Set NumGoroutines to 1 to use a single streaming pull stream

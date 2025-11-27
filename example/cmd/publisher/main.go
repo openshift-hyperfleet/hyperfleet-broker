@@ -11,8 +11,23 @@ import (
 	"github.com/openshift-hyperfleet/hyperfleet-broker/broker"
 )
 
+func createEvent(id string, message string) event.Event {
+	evt := event.New()
+	evt.SetType("com.example.event.created")
+	evt.SetSource("example-publisher")
+	evt.SetID(id)
+	evt.SetTime(time.Now())
+	evt.SetData(cloudevents.ApplicationJSON, map[string]interface{}{
+		"message":   message,
+		"timestamp": time.Now().Format(time.RFC3339),
+	})
+	return evt
+}
+
 func main() {
 	interval := flag.Duration("interval", 20*time.Millisecond, "Interval between publishing events")
+	topic := flag.String("topic", "example-topic", "Topic to publish events to")
+	message := flag.String("message", "", "Send a single message with this content and exit")
 	flag.Parse()
 
 	// Create publisher
@@ -22,13 +37,18 @@ func main() {
 	}
 	defer publisher.Close()
 
-	topic := "example-topic"
-	// Get topic from command line argument
-	if flag.NArg() > 0 {
-		topic = flag.Arg(0)
+	// Single message mode
+	if *message != "" {
+		evt := createEvent(fmt.Sprintf("event-%d", time.Now().UnixNano()), *message)
+		if err := publisher.Publish(*topic, &evt); err != nil {
+			log.Fatalf("Error publishing event: %v", err)
+		}
+		log.Printf("Published single message to topic %s: %s", *topic, *message)
+		return
 	}
 
-	log.Printf("Publisher started. Publishing events to topic: %s with interval: %v", topic, *interval)
+	// Continuous publishing mode
+	log.Printf("Publisher started. Publishing events to topic: %s with interval: %v", *topic, *interval)
 	log.Printf("Press Ctrl+C to stop...")
 
 	// Publish events
@@ -38,21 +58,8 @@ func main() {
 	counter := 0
 	for range ticker.C {
 		counter++
-
-		// Create a CloudEvent
-		evt := event.New()
-		evt.SetType("com.example.event.created")
-		evt.SetSource("example-publisher")
-		evt.SetID(fmt.Sprintf("event-%d", counter))
-		evt.SetTime(time.Now())
-		evt.SetData(cloudevents.ApplicationJSON, map[string]interface{}{
-			"message":   "Hello from publisher",
-			"counter":   counter,
-			"timestamp": time.Now().Format(time.RFC3339),
-		})
-
-		// Publish to topic
-		if err := publisher.Publish(topic, &evt); err != nil {
+		evt := createEvent(fmt.Sprintf("event-%d", counter), "Hello from publisher")
+		if err := publisher.Publish(*topic, &evt); err != nil {
 			log.Printf("Error publishing event: %v", err)
 		} else {
 			log.Printf("Published event #%d (ID: %s)", counter, evt.ID())

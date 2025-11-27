@@ -202,16 +202,8 @@ func TestPublisherPublishErrorHandling(t *testing.T) {
 }
 
 func TestSubscriberSubscribeErrorHandling(t *testing.T) {
-	configMap := map[string]string{
-		"broker.type":            "rabbitmq",
-		"broker.rabbitmq.url":    "amqp://guest:guest@localhost:5672/",
-		"subscriber.parallelism": "1",
-	}
-
-	sub, err := NewSubscriber("test-sub", configMap)
-	if err != nil {
-		t.Skipf("Skipping test: failed to create subscriber: %v", err)
-	}
+	// Use mock subscriber to test error handling without requiring a real broker
+	sub := NewMockSubscriber()
 	defer func() {
 		if err := sub.Close(); err != nil {
 			t.Logf("failed to close subscriber: %v", err)
@@ -240,7 +232,7 @@ func TestSubscriberSubscribeErrorHandling(t *testing.T) {
 			handler: func(ctx context.Context, evt *event.Event) error {
 				return nil
 			},
-			expectError: false, // Subscription setup should succeed, actual connection may fail
+			expectError: false,
 		},
 		{
 			name:  "empty topic",
@@ -254,6 +246,7 @@ func TestSubscriberSubscribeErrorHandling(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			sub.Reset()
 			err := sub.Subscribe(ctx, tt.topic, tt.handler)
 			if tt.expectError {
 				assert.Error(t, err)
@@ -261,12 +254,9 @@ func TestSubscriberSubscribeErrorHandling(t *testing.T) {
 					assert.Contains(t, err.Error(), tt.errorMsg)
 				}
 			} else {
-				// If no error expected, subscription setup should succeed
-				// Actual connection errors are acceptable and don't fail the test
-				if err != nil && tt.name == "valid handler" {
-					// Connection errors are expected without a real broker
-					// This is acceptable - we're testing error handling, not connectivity
-					t.Logf("Expected connection error (no real broker): %v", err)
+				assert.NoError(t, err)
+				if tt.handler != nil {
+					assert.True(t, sub.HasHandler(tt.topic))
 				}
 			}
 		})
@@ -275,19 +265,9 @@ func TestSubscriberSubscribeErrorHandling(t *testing.T) {
 
 func TestSubscriberHandlerErrorHandling(t *testing.T) {
 	// This test verifies that handler errors are handled correctly
-	// In a real scenario, this would be tested with integration tests
-	// For unit tests, we verify the error handling logic exists
+	// Using mock subscriber to test without requiring a real broker
 
-	configMap := map[string]string{
-		"broker.type":            "rabbitmq",
-		"broker.rabbitmq.url":    "amqp://guest:guest@localhost:5672/",
-		"subscriber.parallelism": "1",
-	}
-
-	sub, err := NewSubscriber("test-sub", configMap)
-	if err != nil {
-		t.Skipf("Skipping test: failed to create subscriber: %v", err)
-	}
+	sub := NewMockSubscriber()
 	defer func() {
 		if err := sub.Close(); err != nil {
 			t.Logf("failed to close subscriber: %v", err)
@@ -295,18 +275,26 @@ func TestSubscriberHandlerErrorHandling(t *testing.T) {
 	}()
 
 	// Verify that a handler that returns an error is accepted
-	// (The actual error handling happens in the worker goroutine)
 	errorHandler := func(ctx context.Context, evt *event.Event) error {
 		return assert.AnError
 	}
 
 	ctx := context.Background()
-	// This should not error - handler errors are handled internally
-	err = sub.Subscribe(ctx, "test-topic", errorHandler)
-	// Connection will fail without real broker, but handler registration should be fine
-	if err != nil {
-		t.Logf("Connection error expected (no real broker): %v", err)
-	}
+
+	// Subscribe should succeed - handler errors are handled during message processing
+	err := sub.Subscribe(ctx, "test-topic", errorHandler)
+	assert.NoError(t, err)
+	assert.True(t, sub.HasHandler("test-topic"))
+
+	// Simulate message delivery and verify handler error is propagated
+	evt := event.New()
+	evt.SetID("test-id")
+	evt.SetType("test.type")
+	evt.SetSource("test-source")
+
+	err = sub.SimulateMessage(ctx, "test-topic", &evt)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "assert.AnError")
 }
 
 func TestBuildConfigFromMapErrorHandling(t *testing.T) {

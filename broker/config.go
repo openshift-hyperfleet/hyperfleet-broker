@@ -23,28 +23,6 @@ type brokerConfig struct {
 	GooglePubSub googlePubSubConfig `mapstructure:"googlepubsub"`
 }
 
-// rabbitMQConfig holds RabbitMQ-specific configuration
-type rabbitMQConfig struct {
-	URL              string `mapstructure:"url"`
-	Exchange         string `mapstructure:"exchange"`
-	ExchangeType     string `mapstructure:"exchange_type"`
-	Queue            string `mapstructure:"queue"`
-	RoutingKey       string `mapstructure:"routing_key"`
-	PrefetchCount    int    `mapstructure:"prefetch_count"`
-	PrefetchSize     int    `mapstructure:"prefetch_size"`
-	ConsumerTag      string `mapstructure:"consumer_tag"`
-	PublisherConfirm bool   `mapstructure:"publisher_confirm"`
-}
-
-// googlePubSubConfig holds Google Pub/Sub-specific configuration
-type googlePubSubConfig struct {
-	ProjectID              string `mapstructure:"project_id"`
-	Topic                  string `mapstructure:"topic"`
-	Subscription           string `mapstructure:"subscription"`
-	MaxOutstandingMessages int    `mapstructure:"max_outstanding_messages"`
-	NumGoroutines          int    `mapstructure:"num_goroutines"`
-}
-
 // subscriberConfig holds subscriber-specific configuration
 type subscriberConfig struct {
 	Parallelism int `mapstructure:"parallelism"`

@@ -163,8 +163,27 @@ broker:
   # Google Pub/Sub Configuration
   googlepubsub:
     project_id: my-gcp-project
-    max_outstanding_messages: 100
+    
+    # Subscription settings
+    ack_deadline_seconds: 60          # 10-600 seconds (default: 10)
+    message_retention_duration: "604800s"  # 10m to 31d (default: 7 days)
+    expiration_ttl: "2678400s"        # Min 1d, or 0 = never expire (default: 31 days)
+    enable_message_ordering: false    # Enable ordered delivery by ordering key
+    retry_min_backoff: "10s"          # 0s to 600s
+    retry_max_backoff: "600s"         # 0s to 600s
+    
+    # Dead letter settings
+    dead_letter_topic: "my-dead-letter-topic"  # Auto-created if create_topic_if_missing is true
+    dead_letter_max_attempts: 5       # 5-100 (default: 5)
+    
+    # Receive settings (client-side flow control)
+    max_outstanding_messages: 1000
+    max_outstanding_bytes: 104857600  # 100MB
     num_goroutines: 10
+    
+    # Behavior flags (default: false - infrastructure must exist)
+    create_topic_if_missing: true        # Auto-create topic if it doesn't exist
+    create_subscription_if_missing: true # Auto-create subscription if it doesn't exist
 
 # Subscriber Configuration
 subscriber:
@@ -178,6 +197,56 @@ log_config: false  # Set to true to log full configuration on startup
 
 ### Configuration Options
 
+### Auto creation of infrastructure (topics & subscriptions)
+
+#### Google PubSub behavior
+
+By default, this library will **not** create any Google Pub/Sub infrastructure for you. That means topics and subscriptions are expected to exist already. You can opt into automatic creation of missing topics or subscriptions using the following flags in your configuration:
+
+- `broker.googlepubsub.create_topic_if_missing`:  
+  - If set to `true`, missing Pub/Sub topics referenced in your configuration will be created automatically at startup.
+  - If set to `false` (default), attempting to use a topic that does not exist will cause an error.
+
+- `broker.googlepubsub.create_subscription_if_missing`:  
+  - If set to `true`, subscriptions will be created automatically if they do not yet exist.
+  - If set to `false` (default), subscribers will fail if the subscription does not exist.
+
+#### Example
+
+```yaml
+broker:
+  googlepubsub:
+    create_topic_if_missing: true
+    create_subscription_if_missing: true
+```
+
+The `create_*_if_missing` settings only apply **if you have sufficient permissions** (e.g., `pubsub.topics.create` and/or `pubsub.subscriptions.create` on the GCP project).
+
+If you use **dead letter topics** (`dead_letter_topic`), the library will also auto-create the dead letter topic—as long as `create_topic_if_missing` is enabled.
+
+**Best practice:**  
+- Use the auto-create flags in development environments.
+- For production, it's recommended to provision resources ahead of time (via Terraform, gcloud CLI, etc.) and keep these flags disabled for least-privilege principle.
+
+#### RabbitMQ behavior
+
+RabbitMQ works differently—there are no `create_*_if_missing` flags for RabbitMQ.
+
+With RabbitMQ (AMQP protocol), exchanges and queues are **always declared automatically** when you publish or subscribe. This is the standard AMQP pattern:
+
+- The library uses watermill's `NewDurablePubSubConfig` which declares durable exchanges and queues on first use
+- Declaration is **idempotent**—if the exchange/queue already exists with compatible settings, it's a no-op
+- There's no way to "fail if not exists" like with Google Pub/Sub
+
+| Aspect | RabbitMQ (AMQP) | Google Pub/Sub |
+|--------|-----------------|----------------|
+| Resource creation | Declared inline as part of protocol | Separate API calls |
+| Default behavior | Always creates if missing | Must opt-in with `create_*_if_missing` |
+| Typical pattern | Declare on connect | Pre-provision infrastructure |
+
+**Summary:**
+- **RabbitMQ**: Infrastructure (exchanges, queues) is always auto-created—no configuration needed
+- *
 
 ### Message processing parallelism
 
@@ -216,14 +285,50 @@ After setting the maximun number of allowed "in flight" messages, further settin
     - Example: `parallelism=5` and `prefetch_count=20` → up to ~100 messages in flight for that subscriber.
 
 - **Google Pub/Sub-specific options**
-  - ⚠️ Please note that watermill's PubSub subscriber implementation already provides a way to process messages in parallel. So there is no need to increase `subscriber.parallelism`
+  - ⚠️ Please note that watermill's PubSub subscriber implementation already provides a way to process messages in parallel. So there is no need to increase `subscriber.parallelism` above 1
+  
+  **Receive Settings (client-side flow control):**
   - **`broker.googlepubsub.max_outstanding_messages`**:
     - Upper bound on the total number of messages being processed at once by the subscriber.
     - Acts as a backpressure mechanism; when the limit is reached, the client stops pulling new messages until some are acked.
+  - **`broker.googlepubsub.max_outstanding_bytes`**:
+    - Upper bound on the total size of messages being processed at once.
+    - Alternative to message count for limiting by payload size.
   - **`broker.googlepubsub.num_goroutines`**:
     - Number of internal goroutines used by the Pub/Sub client to pull and dispatch messages.
     - Higher values can increase throughput on busy topics but also increase load on the broker and your application.
   - Together with `subscriber.parallelism`, these settings determine how many messages can be **pulled and processed concurrently** for each subscription.
+  
+  **Subscription Settings:**
+  - **`broker.googlepubsub.ack_deadline_seconds`** (10-600, default: 10):
+    - Time in seconds that Pub/Sub waits for the subscriber to acknowledge receipt before resending.
+    - Increase this for long-running message handlers.
+  - **`broker.googlepubsub.message_retention_duration`** (10m-31d, default: 7 days):
+    - How long to retain unacknowledged messages in the subscription.
+    - Format: Google Cloud duration string (e.g., `"604800s"`, `"7d"`, `"168h"`).
+  - **`broker.googlepubsub.expiration_ttl`** (min 1d or 0, default: 31 days):
+    - Time of inactivity before the subscription is automatically deleted.
+    - Set to `"0"` to never expire.
+  - **`broker.googlepubsub.enable_message_ordering`** (default: false):
+    - Enable ordered message delivery using ordering keys.
+    - Messages with the same ordering key are delivered in order.
+  - **`broker.googlepubsub.retry_min_backoff`** / **`retry_max_backoff`** (0s-600s):
+    - Minimum and maximum delay between delivery retries for failed messages.
+  
+  **Dead Letter Settings:**
+  - **`broker.googlepubsub.dead_letter_topic`**:
+    - Topic name for messages that fail delivery after max attempts.
+    - The dead letter topic is automatically created if `create_topic_if_missing` is true.
+  - **`broker.googlepubsub.dead_letter_max_attempts`** (5-100, default: 5):
+    - Maximum number of delivery attempts before sending to the dead letter topic.
+  
+  **Behavior Flags:**
+  - **`broker.googlepubsub.create_topic_if_missing`** (default: false):
+    - When true, automatically creates the topic if it doesn't exist.
+    - When false (default), fails if the topic doesn't exist.
+  - **`broker.googlepubsub.create_subscription_if_missing`** (default: false):
+    - When true, automatically creates the subscription if it doesn't exist.
+    - When false (default), fails if the subscription doesn't exist.
 
 #### `log_config` (boolean, default: `false`)
 
@@ -471,4 +576,30 @@ export PUBSUB_EMULATOR_HOST=localhost:8085
 
 podman run --rm --name pubsub-emulator -d -p 8085:8085 google/cloud-sdk:emulators /bin/bash -c "gcloud beta emulators pubsub start --project=hcm-hyperfleet --host-port='0.0.0.0:8085'"
 ```
+
+
+## Sample CloudEvent
+
+A CloudEvent is a standardized way to describe event data. Below is an example of a CloudEvent in JSON format, representing a domain event:
+
+```json
+{
+  "specversion": "1.0",
+  "type": "com.redhat.hyperfleet.cluster.reconcile.v1",
+  "source": "/hyperfleet/service/sentinel",
+  "id": "00000000-0000-0000-0000-000000000000",
+  "time": "2025-10-23T12:00:00Z",
+  "datacontenttype": "application/json",
+  "data": {
+    "id": "11111111-1111-1111-1111-111111111111",
+    "kind": "Cluster",
+    "href": "https://api.hyperfleet.com/v1/clusters/11111111-1111-1111-1111-111111111111",
+    "generation": 5
+  }
+}
+```
+
+
+
+
 

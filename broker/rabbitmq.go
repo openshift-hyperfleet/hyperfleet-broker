@@ -9,6 +9,19 @@ import (
 	"github.com/ThreeDotsLabs/watermill/message"
 )
 
+// rabbitMQConfig holds RabbitMQ-specific configuration
+type rabbitMQConfig struct {
+	URL              string `mapstructure:"url"`
+	Exchange         string `mapstructure:"exchange"`
+	ExchangeType     string `mapstructure:"exchange_type"`
+	Queue            string `mapstructure:"queue"`
+	RoutingKey       string `mapstructure:"routing_key"`
+	PrefetchCount    int    `mapstructure:"prefetch_count"`
+	PrefetchSize     int    `mapstructure:"prefetch_size"`
+	ConsumerTag      string `mapstructure:"consumer_tag"`
+	PublisherConfirm bool   `mapstructure:"publisher_confirm"`
+}
+
 // newRabbitMQPublisher creates a RabbitMQ publisher
 func newRabbitMQPublisher(cfg *config, logger watermill.LoggerAdapter) (message.Publisher, error) {
 	amqpConfig := amqp.NewDurablePubSubConfig(
