@@ -436,3 +436,147 @@ func TestBuildConfigFromMapWithInvalidTypes(t *testing.T) {
 		})
 	}
 }
+
+func TestGooglePubSubConfigValidation(t *testing.T) {
+	tests := []struct {
+		name        string
+		configMap   map[string]string
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name: "valid config with all settings",
+			configMap: map[string]string{
+				"broker.type":                                    "googlepubsub",
+				"broker.googlepubsub.project_id":                 "test-project",
+				"broker.googlepubsub.ack_deadline_seconds":       "60",
+				"broker.googlepubsub.message_retention_duration": "604800s",
+				"broker.googlepubsub.expiration_ttl":             "2678400s",
+				"broker.googlepubsub.enable_message_ordering":    "true",
+				"broker.googlepubsub.retry_min_backoff":          "10s",
+				"broker.googlepubsub.retry_max_backoff":          "600s",
+				"broker.googlepubsub.dead_letter_topic":          "dead-letter",
+				"broker.googlepubsub.dead_letter_max_attempts":   "10",
+				"broker.googlepubsub.max_outstanding_messages":   "1000",
+				"broker.googlepubsub.max_outstanding_bytes":      "104857600",
+				"broker.googlepubsub.num_goroutines":             "10",
+			},
+			expectError: false,
+		},
+		{
+			name: "ack_deadline_seconds too low",
+			configMap: map[string]string{
+				"broker.type":                              "googlepubsub",
+				"broker.googlepubsub.project_id":           "test-project",
+				"broker.googlepubsub.ack_deadline_seconds": "5",
+			},
+			expectError: true,
+			errorMsg:    "ack_deadline_seconds must be between 10 and 600",
+		},
+		{
+			name: "ack_deadline_seconds too high",
+			configMap: map[string]string{
+				"broker.type":                              "googlepubsub",
+				"broker.googlepubsub.project_id":           "test-project",
+				"broker.googlepubsub.ack_deadline_seconds": "700",
+			},
+			expectError: true,
+			errorMsg:    "ack_deadline_seconds must be between 10 and 600",
+		},
+		{
+			name: "invalid message_retention_duration format",
+			configMap: map[string]string{
+				"broker.type":                                    "googlepubsub",
+				"broker.googlepubsub.project_id":                 "test-project",
+				"broker.googlepubsub.message_retention_duration": "invalid",
+			},
+			expectError: true,
+			errorMsg:    "message_retention_duration",
+		},
+		{
+			name: "message_retention_duration too short",
+			configMap: map[string]string{
+				"broker.type":                                    "googlepubsub",
+				"broker.googlepubsub.project_id":                 "test-project",
+				"broker.googlepubsub.message_retention_duration": "5m",
+			},
+			expectError: true,
+			errorMsg:    "message_retention_duration must be between 10m and 31d",
+		},
+		{
+			name: "expiration_ttl too short",
+			configMap: map[string]string{
+				"broker.type":                         "googlepubsub",
+				"broker.googlepubsub.project_id":      "test-project",
+				"broker.googlepubsub.expiration_ttl":  "1h",
+			},
+			expectError: true,
+			errorMsg:    "expiration_ttl must be at least 1d",
+		},
+		{
+			name: "expiration_ttl zero is valid (never expire)",
+			configMap: map[string]string{
+				"broker.type":                         "googlepubsub",
+				"broker.googlepubsub.project_id":      "test-project",
+				"broker.googlepubsub.expiration_ttl":  "0",
+			},
+			expectError: false,
+		},
+		{
+			name: "retry_min_backoff greater than max",
+			configMap: map[string]string{
+				"broker.type":                            "googlepubsub",
+				"broker.googlepubsub.project_id":         "test-project",
+				"broker.googlepubsub.retry_min_backoff":  "500s",
+				"broker.googlepubsub.retry_max_backoff":  "100s",
+			},
+			expectError: true,
+			errorMsg:    "retry_min_backoff must be less than or equal to retry_max_backoff",
+		},
+		{
+			name: "dead_letter_max_attempts too low",
+			configMap: map[string]string{
+				"broker.type":                                  "googlepubsub",
+				"broker.googlepubsub.project_id":               "test-project",
+				"broker.googlepubsub.dead_letter_max_attempts": "3",
+			},
+			expectError: true,
+			errorMsg:    "dead_letter_max_attempts must be between 5 and 100",
+		},
+		{
+			name: "dead_letter_max_attempts too high",
+			configMap: map[string]string{
+				"broker.type":                                  "googlepubsub",
+				"broker.googlepubsub.project_id":               "test-project",
+				"broker.googlepubsub.dead_letter_max_attempts": "150",
+			},
+			expectError: true,
+			errorMsg:    "dead_letter_max_attempts must be between 5 and 100",
+		},
+		{
+			name: "valid duration with day suffix",
+			configMap: map[string]string{
+				"broker.type":                                    "googlepubsub",
+				"broker.googlepubsub.project_id":                 "test-project",
+				"broker.googlepubsub.message_retention_duration": "7d",
+			},
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := buildConfigFromMap(tt.configMap)
+			if tt.expectError {
+				assert.Error(t, err)
+				assert.Nil(t, cfg)
+				if tt.errorMsg != "" {
+					assert.Contains(t, err.Error(), tt.errorMsg)
+				}
+			} else {
+				assert.NoError(t, err)
+				require.NotNil(t, cfg)
+			}
+		})
+	}
+}
