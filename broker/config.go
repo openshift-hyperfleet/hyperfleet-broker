@@ -38,11 +38,34 @@ type rabbitMQConfig struct {
 
 // googlePubSubConfig holds Google Pub/Sub-specific configuration
 type googlePubSubConfig struct {
-	ProjectID              string `mapstructure:"project_id"`
-	Topic                  string `mapstructure:"topic"`
-	Subscription           string `mapstructure:"subscription"`
-	MaxOutstandingMessages int    `mapstructure:"max_outstanding_messages"`
-	NumGoroutines          int    `mapstructure:"num_goroutines"`
+	// Connection settings
+	ProjectID    string `mapstructure:"project_id"`
+	Topic        string `mapstructure:"topic"`
+	Subscription string `mapstructure:"subscription"` // Deprecated: subscription name is generated dynamically
+
+	// Subscription settings
+	AckDeadlineSeconds       int    `mapstructure:"ack_deadline_seconds"`
+	MessageRetentionDuration string `mapstructure:"message_retention_duration"`
+	ExpirationTTL            string `mapstructure:"expiration_ttl"`
+	EnableMessageOrdering    bool   `mapstructure:"enable_message_ordering"`
+	RetryMinBackoff          string `mapstructure:"retry_min_backoff"`
+	RetryMaxBackoff          string `mapstructure:"retry_max_backoff"`
+
+	// Dead letter settings
+	DeadLetterTopic       string `mapstructure:"dead_letter_topic"`
+	DeadLetterMaxAttempts int    `mapstructure:"dead_letter_max_attempts"`
+
+	// Topic settings
+	TopicRetentionDuration string `mapstructure:"topic_retention_duration"`
+
+	// Receive settings (client-side flow control)
+	MaxOutstandingMessages int `mapstructure:"max_outstanding_messages"`
+	MaxOutstandingBytes    int `mapstructure:"max_outstanding_bytes"`
+	NumGoroutines          int `mapstructure:"num_goroutines"`
+
+	// Behavior flags
+	DoNotCreateTopic        bool `mapstructure:"do_not_create_topic"`
+	DoNotCreateSubscription bool `mapstructure:"do_not_create_subscription"`
 }
 
 // subscriberConfig holds subscriber-specific configuration
