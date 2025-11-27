@@ -31,7 +31,9 @@ func TestMessageToEvent(t *testing.T) {
 				evt.SetSubject("test-subject")
 				evt.SetDataSchema("http://example.com/schema")
 				evt.SetDataContentType("application/json")
-				evt.SetData(cloudevents.ApplicationJSON, map[string]string{"key": "value"})
+				if err := evt.SetData(cloudevents.ApplicationJSON, map[string]string{"key": "value"}); err != nil {
+					panic(err)
+				}
 
 				payload, _ := json.Marshal(evt)
 				msg := message.NewMessage("test-uuid", payload)
@@ -114,7 +116,9 @@ func TestEventToMessage(t *testing.T) {
 				evt.SetSubject("test-subject")
 				evt.SetDataSchema("http://example.com/schema")
 				evt.SetDataContentType("application/json")
-				evt.SetData(cloudevents.ApplicationJSON, map[string]string{"key": "value"})
+				if err := evt.SetData(cloudevents.ApplicationJSON, map[string]string{"key": "value"}); err != nil {
+					panic(err)
+				}
 				return &evt
 			},
 			expectError: false,
@@ -187,7 +191,9 @@ func TestRoundTripConversion(t *testing.T) {
 	originalEvt.SetSubject("test-subject")
 	originalEvt.SetDataSchema("http://example.com/schema")
 	originalEvt.SetDataContentType("application/json")
-	originalEvt.SetData(cloudevents.ApplicationJSON, map[string]string{"key": "value"})
+	if err := originalEvt.SetData(cloudevents.ApplicationJSON, map[string]string{"key": "value"}); err != nil {
+		require.NoError(t, err, "failed to set event data")
+	}
 
 	// Convert to message
 	msg, err := eventToMessage(&originalEvt)

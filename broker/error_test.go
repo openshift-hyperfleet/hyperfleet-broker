@@ -83,7 +83,11 @@ func TestNewPublisherErrorHandling(t *testing.T) {
 				if err == nil {
 					assert.NotNil(t, pub)
 					if pub != nil {
-						defer pub.Close()
+						defer func() {
+							if err := pub.Close(); err != nil {
+								t.Logf("failed to close publisher: %v", err)
+							}
+						}()
 					}
 				}
 			}
@@ -173,7 +177,11 @@ func TestNewSubscriberErrorHandling(t *testing.T) {
 				if err == nil {
 					assert.NotNil(t, sub)
 					if sub != nil {
-						defer sub.Close()
+						defer func() {
+							if err := sub.Close(); err != nil {
+								t.Logf("failed to close subscriber: %v", err)
+							}
+						}()
 					}
 				}
 			}
@@ -204,7 +212,11 @@ func TestSubscriberSubscribeErrorHandling(t *testing.T) {
 	if err != nil {
 		t.Skipf("Skipping test: failed to create subscriber: %v", err)
 	}
-	defer sub.Close()
+	defer func() {
+		if err := sub.Close(); err != nil {
+			t.Logf("failed to close subscriber: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
 
@@ -276,7 +288,11 @@ func TestSubscriberHandlerErrorHandling(t *testing.T) {
 	if err != nil {
 		t.Skipf("Skipping test: failed to create subscriber: %v", err)
 	}
-	defer sub.Close()
+	defer func() {
+		if err := sub.Close(); err != nil {
+			t.Logf("failed to close subscriber: %v", err)
+		}
+	}()
 
 	// Verify that a handler that returns an error is accepted
 	// (The actual error handling happens in the worker goroutine)
@@ -326,11 +342,6 @@ func TestBuildConfigFromMapErrorHandling(t *testing.T) {
 				assert.Error(t, err)
 				assert.Nil(t, cfg)
 			} else {
-				// buildConfigFromMap should handle nil/empty maps gracefully
-				if tt.configMap == nil {
-					// For nil, it might return an error or handle it
-					// Let's see what happens
-				}
 				// For empty map, it should return default config
 				if len(tt.configMap) == 0 {
 					assert.NoError(t, err)

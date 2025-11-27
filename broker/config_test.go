@@ -137,10 +137,14 @@ func TestLoadConfig(t *testing.T) {
 	// Save original environment
 	originalConfigFile := os.Getenv("BROKER_CONFIG_FILE")
 	defer func() {
+		var err error
 		if originalConfigFile != "" {
-			os.Setenv("BROKER_CONFIG_FILE", originalConfigFile)
+			err = os.Setenv("BROKER_CONFIG_FILE", originalConfigFile)
 		} else {
-			os.Unsetenv("BROKER_CONFIG_FILE")
+			err = os.Unsetenv("BROKER_CONFIG_FILE")
+		}
+		if err != nil {
+			t.Logf("failed to restore BROKER_CONFIG_FILE: %v", err)
 		}
 	}()
 
@@ -169,11 +173,15 @@ subscriber:
 `
 				err := os.WriteFile(configPath, []byte(configContent), 0644)
 				require.NoError(t, err)
-				os.Setenv("BROKER_CONFIG_FILE", configPath)
+				if err := os.Setenv("BROKER_CONFIG_FILE", configPath); err != nil {
+					t.Fatalf("failed to set BROKER_CONFIG_FILE: %v", err)
+				}
 				return configPath
 			},
 			cleanup: func(t *testing.T, path string) {
-				os.Unsetenv("BROKER_CONFIG_FILE")
+				if err := os.Unsetenv("BROKER_CONFIG_FILE"); err != nil {
+					t.Logf("failed to unset BROKER_CONFIG_FILE: %v", err)
+				}
 			},
 			expectError: false,
 			validate: func(t *testing.T, cfg *config) {
@@ -199,11 +207,15 @@ subscriber:
 `
 				err := os.WriteFile(configPath, []byte(configContent), 0644)
 				require.NoError(t, err)
-				os.Setenv("BROKER_CONFIG_FILE", configPath)
+				if err := os.Setenv("BROKER_CONFIG_FILE", configPath); err != nil {
+					t.Fatalf("failed to set BROKER_CONFIG_FILE: %v", err)
+				}
 				return configPath
 			},
 			cleanup: func(t *testing.T, path string) {
-				os.Unsetenv("BROKER_CONFIG_FILE")
+				if err := os.Unsetenv("BROKER_CONFIG_FILE"); err != nil {
+					t.Logf("failed to unset BROKER_CONFIG_FILE: %v", err)
+				}
 			},
 			expectError: false,
 			validate: func(t *testing.T, cfg *config) {
@@ -224,11 +236,15 @@ broker:
 `
 				err := os.WriteFile(configPath, []byte(invalidYaml), 0644)
 				require.NoError(t, err)
-				os.Setenv("BROKER_CONFIG_FILE", configPath)
+				if err := os.Setenv("BROKER_CONFIG_FILE", configPath); err != nil {
+					t.Fatalf("failed to set BROKER_CONFIG_FILE: %v", err)
+				}
 				return configPath
 			},
 			cleanup: func(t *testing.T, path string) {
-				os.Unsetenv("BROKER_CONFIG_FILE")
+				if err := os.Unsetenv("BROKER_CONFIG_FILE"); err != nil {
+					t.Logf("failed to unset BROKER_CONFIG_FILE: %v", err)
+				}
 			},
 			expectError: true,
 			validate:    nil,
@@ -248,13 +264,21 @@ subscriber:
 `
 				err := os.WriteFile(configPath, []byte(configContent), 0644)
 				require.NoError(t, err)
-				os.Setenv("BROKER_CONFIG_FILE", configPath)
-				os.Setenv("SUBSCRIBER_PARALLELISM", "20")
+				if err := os.Setenv("BROKER_CONFIG_FILE", configPath); err != nil {
+					t.Fatalf("failed to set BROKER_CONFIG_FILE: %v", err)
+				}
+				if err := os.Setenv("SUBSCRIBER_PARALLELISM", "20"); err != nil {
+					t.Fatalf("failed to set SUBSCRIBER_PARALLELISM: %v", err)
+				}
 				return configPath
 			},
 			cleanup: func(t *testing.T, path string) {
-				os.Unsetenv("BROKER_CONFIG_FILE")
-				os.Unsetenv("SUBSCRIBER_PARALLELISM")
+				if err := os.Unsetenv("BROKER_CONFIG_FILE"); err != nil {
+					t.Logf("failed to unset BROKER_CONFIG_FILE: %v", err)
+				}
+				if err := os.Unsetenv("SUBSCRIBER_PARALLELISM"); err != nil {
+					t.Logf("failed to unset SUBSCRIBER_PARALLELISM: %v", err)
+				}
 			},
 			expectError: false,
 			validate: func(t *testing.T, cfg *config) {
@@ -278,13 +302,21 @@ subscriber:
 `
 				err := os.WriteFile(configPath, []byte(configContent), 0644)
 				require.NoError(t, err)
-				os.Setenv("BROKER_CONFIG_FILE", configPath)
-				os.Setenv("BROKER_RABBITMQ_URL", "amqp://user:pass@override-host:5673/vhost")
+				if err := os.Setenv("BROKER_CONFIG_FILE", configPath); err != nil {
+					t.Fatalf("failed to set BROKER_CONFIG_FILE: %v", err)
+				}
+				if err := os.Setenv("BROKER_RABBITMQ_URL", "amqp://user:pass@override-host:5673/vhost"); err != nil {
+					t.Fatalf("failed to set BROKER_RABBITMQ_URL: %v", err)
+				}
 				return configPath
 			},
 			cleanup: func(t *testing.T, path string) {
-				os.Unsetenv("BROKER_CONFIG_FILE")
-				os.Unsetenv("BROKER_RABBITMQ_URL")
+				if err := os.Unsetenv("BROKER_CONFIG_FILE"); err != nil {
+					t.Logf("failed to unset BROKER_CONFIG_FILE: %v", err)
+				}
+				if err := os.Unsetenv("BROKER_RABBITMQ_URL"); err != nil {
+					t.Logf("failed to unset BROKER_RABBITMQ_URL: %v", err)
+				}
 			},
 			expectError: false,
 			validate: func(t *testing.T, cfg *config) {
@@ -321,10 +353,14 @@ func TestLoadConfigWithInvalidUnmarshal(t *testing.T) {
 	// Save original environment
 	originalConfigFile := os.Getenv("BROKER_CONFIG_FILE")
 	defer func() {
+		var err error
 		if originalConfigFile != "" {
-			os.Setenv("BROKER_CONFIG_FILE", originalConfigFile)
+			err = os.Setenv("BROKER_CONFIG_FILE", originalConfigFile)
 		} else {
-			os.Unsetenv("BROKER_CONFIG_FILE")
+			err = os.Unsetenv("BROKER_CONFIG_FILE")
+		}
+		if err != nil {
+			t.Logf("failed to restore BROKER_CONFIG_FILE: %v", err)
 		}
 	}()
 
@@ -339,8 +375,14 @@ broker:
 `
 	err := os.WriteFile(configPath, []byte(configContent), 0644)
 	require.NoError(t, err)
-	os.Setenv("BROKER_CONFIG_FILE", configPath)
-	defer os.Unsetenv("BROKER_CONFIG_FILE")
+	if err := os.Setenv("BROKER_CONFIG_FILE", configPath); err != nil {
+		t.Fatalf("failed to set BROKER_CONFIG_FILE: %v", err)
+	}
+	defer func() {
+		if err := os.Unsetenv("BROKER_CONFIG_FILE"); err != nil {
+			t.Logf("failed to unset BROKER_CONFIG_FILE: %v", err)
+		}
+	}()
 
 	cfg, err := loadConfig()
 	// Note: Viper might handle type conversion, so this might not error
