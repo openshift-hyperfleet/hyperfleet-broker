@@ -38,3 +38,4 @@ func (e *SubscriberError) Unwrap() error {
 	return e.Err
 }
 
+

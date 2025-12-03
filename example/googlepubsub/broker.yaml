@@ -39,6 +39,8 @@ broker:
     # Set to true to automatically create topics/subscriptions if they don't exist
     create_topic_if_missing: true
     create_subscription_if_missing: true
+    dead_letter_topic: "my-dead-letter-topic"
+    dead_letter_max_attempts: 5
 
 subscriber:
   parallelism: 1

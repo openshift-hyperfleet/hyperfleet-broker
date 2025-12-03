@@ -229,4 +229,3 @@ func TestSubscriberWithHandlerNoErrorsSent(t *testing.T) {
 		// Expected - no errors
 	}
 }
-

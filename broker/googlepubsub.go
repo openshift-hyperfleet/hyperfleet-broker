@@ -20,9 +20,7 @@ import (
 // googlePubSubConfig holds Google Pub/Sub-specific configuration
 type googlePubSubConfig struct {
 	// Connection settings
-	ProjectID    string `mapstructure:"project_id"`
-	Topic        string `mapstructure:"topic"`
-	Subscription string `mapstructure:"subscription"` // Deprecated: subscription name is generated dynamically
+	ProjectID string `mapstructure:"project_id"`
 
 	// Subscription settings
 	AckDeadlineSeconds       int    `mapstructure:"ack_deadline_seconds"`
@@ -153,11 +151,11 @@ func newGooglePubSubSubscriber(cfg *config, logger watermill.LoggerAdapter, subs
 	gps := cfg.Broker.GooglePubSub
 
 	// If dead letter topic is configured and we're allowed to create topics, ensure it exists
-	if gps.DeadLetterTopic != "" && gps.CreateTopicIfMissing {
+	if gps.CreateTopicIfMissing {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		if err := ensureDeadLetterTopicExists(ctx, gps.ProjectID, gps.DeadLetterTopic, logger); err != nil {
+		if err := ensureDeadLetterTopicExists(ctx, gps.ProjectID, subscriptionID+"-dlq", logger); err != nil {
 			return nil, fmt.Errorf("failed to ensure dead letter topic exists: %w", err)
 		}
 	}
@@ -168,9 +166,7 @@ func newGooglePubSubSubscriber(cfg *config, logger watermill.LoggerAdapter, subs
 	pubsubConfig := googlepubsub.SubscriberConfig{
 		ProjectID: gps.ProjectID,
 		GenerateSubscriptionName: func(topic string) string {
-			// Generate subscription name: "topic-subscriptionID"
-			// This allows subscribers with the same subscriptionID to share the same subscription
-			return fmt.Sprintf("%s-%s", topic, subscriptionID)
+			return subscriptionID
 		},
 		DoNotCreateTopicIfMissing:        !gps.CreateTopicIfMissing,        // Invert: our positive flag -> watermill's negative flag
 		DoNotCreateSubscriptionIfMissing: !gps.CreateSubscriptionIfMissing, // Invert: our positive flag -> watermill's negative flag
@@ -236,18 +232,16 @@ func newGooglePubSubSubscriber(cfg *config, logger watermill.LoggerAdapter, subs
 		}
 
 		// Set DeadLetterPolicy (for handling messages that fail repeatedly)
-		if gps.DeadLetterTopic != "" {
-			deadLetterPolicy := &pubsubpb.DeadLetterPolicy{
-				DeadLetterTopic: fmt.Sprintf("projects/%s/topics/%s", gps.ProjectID, gps.DeadLetterTopic),
-			}
-			if gps.DeadLetterMaxAttempts > 0 {
-				deadLetterPolicy.MaxDeliveryAttempts = int32(gps.DeadLetterMaxAttempts)
-			} else {
-				// Default to 5 attempts if not specified
-				deadLetterPolicy.MaxDeliveryAttempts = 5
-			}
-			sub.DeadLetterPolicy = deadLetterPolicy
+		deadLetterPolicy := &pubsubpb.DeadLetterPolicy{
+			DeadLetterTopic: fmt.Sprintf("projects/%s/topics/%s", gps.ProjectID, subscriptionID+"-dlq"),
 		}
+		if gps.DeadLetterMaxAttempts > 0 {
+			deadLetterPolicy.MaxDeliveryAttempts = int32(gps.DeadLetterMaxAttempts)
+		} else {
+			// Default to 5 attempts if not specified
+			deadLetterPolicy.MaxDeliveryAttempts = 5
+		}
+		sub.DeadLetterPolicy = deadLetterPolicy
 
 		return sub
 	}

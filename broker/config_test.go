@@ -61,8 +61,6 @@ func TestBuildConfigFromMap(t *testing.T) {
 			validate: func(t *testing.T, cfg *config) {
 				assert.Equal(t, "googlepubsub", cfg.Broker.Type)
 				assert.Equal(t, "test-project", cfg.Broker.GooglePubSub.ProjectID)
-				assert.Equal(t, "test-topic", cfg.Broker.GooglePubSub.Topic)
-				assert.Equal(t, "test-subscription", cfg.Broker.GooglePubSub.Subscription)
 				assert.Equal(t, 100, cfg.Broker.GooglePubSub.MaxOutstandingMessages)
 				assert.Equal(t, 5, cfg.Broker.GooglePubSub.NumGoroutines)
 				assert.Equal(t, 3, cfg.Subscriber.Parallelism)
@@ -506,9 +504,9 @@ func TestGooglePubSubConfigValidation(t *testing.T) {
 		{
 			name: "expiration_ttl too short",
 			configMap: map[string]string{
-				"broker.type":                         "googlepubsub",
-				"broker.googlepubsub.project_id":      "test-project",
-				"broker.googlepubsub.expiration_ttl":  "1h",
+				"broker.type":                        "googlepubsub",
+				"broker.googlepubsub.project_id":     "test-project",
+				"broker.googlepubsub.expiration_ttl": "1h",
 			},
 			expectError: true,
 			errorMsg:    "expiration_ttl must be at least 1d",
@@ -516,19 +514,19 @@ func TestGooglePubSubConfigValidation(t *testing.T) {
 		{
 			name: "expiration_ttl zero is valid (never expire)",
 			configMap: map[string]string{
-				"broker.type":                         "googlepubsub",
-				"broker.googlepubsub.project_id":      "test-project",
-				"broker.googlepubsub.expiration_ttl":  "0",
+				"broker.type":                        "googlepubsub",
+				"broker.googlepubsub.project_id":     "test-project",
+				"broker.googlepubsub.expiration_ttl": "0",
 			},
 			expectError: false,
 		},
 		{
 			name: "retry_min_backoff greater than max",
 			configMap: map[string]string{
-				"broker.type":                            "googlepubsub",
-				"broker.googlepubsub.project_id":         "test-project",
-				"broker.googlepubsub.retry_min_backoff":  "500s",
-				"broker.googlepubsub.retry_max_backoff":  "100s",
+				"broker.type":                           "googlepubsub",
+				"broker.googlepubsub.project_id":        "test-project",
+				"broker.googlepubsub.retry_min_backoff": "500s",
+				"broker.googlepubsub.retry_max_backoff": "100s",
 			},
 			expectError: true,
 			errorMsg:    "retry_min_backoff must be less than or equal to retry_max_backoff",

@@ -868,5 +868,3 @@ func RunErrorChannelNotification(t *testing.T, configMap map[string]string, cfg 
 
 	t.Log("Error channel notification test completed successfully")
 }
-
-
