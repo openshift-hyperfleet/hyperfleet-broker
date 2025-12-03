@@ -96,7 +96,7 @@ func ensureDeadLetterTopicExists(ctx context.Context, projectID, topicName strin
 	if err != nil {
 		return fmt.Errorf("failed to create pubsub client: %w", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	fullyQualifiedName := fmt.Sprintf("projects/%s/topics/%s", projectID, topicName)
 

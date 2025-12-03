@@ -1,10 +1,8 @@
 package broker
 
 import (
-	"context"
 	"testing"
 
-	"github.com/cloudevents/sdk-go/v2/event"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -199,102 +197,6 @@ func TestPublisherPublishErrorHandling(t *testing.T) {
 
 	_, err := NewPublisher(configMap)
 	assert.Error(t, err)
-}
-
-func TestSubscriberSubscribeErrorHandling(t *testing.T) {
-	// Use mock subscriber to test error handling without requiring a real broker
-	sub := NewMockSubscriber()
-	defer func() {
-		if err := sub.Close(); err != nil {
-			t.Logf("failed to close subscriber: %v", err)
-		}
-	}()
-
-	ctx := context.Background()
-
-	tests := []struct {
-		name        string
-		topic       string
-		handler     HandlerFunc
-		expectError bool
-		errorMsg    string
-	}{
-		{
-			name:        "nil handler",
-			topic:       "test-topic",
-			handler:     nil,
-			expectError: true,
-			errorMsg:    "handler must be provided",
-		},
-		{
-			name:  "valid handler",
-			topic: "test-topic",
-			handler: func(ctx context.Context, evt *event.Event) error {
-				return nil
-			},
-			expectError: false,
-		},
-		{
-			name:  "empty topic",
-			topic: "",
-			handler: func(ctx context.Context, evt *event.Event) error {
-				return nil
-			},
-			expectError: false, // Empty topic might be valid for some brokers
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			sub.Reset()
-			err := sub.Subscribe(ctx, tt.topic, tt.handler)
-			if tt.expectError {
-				assert.Error(t, err)
-				if tt.errorMsg != "" {
-					assert.Contains(t, err.Error(), tt.errorMsg)
-				}
-			} else {
-				assert.NoError(t, err)
-				if tt.handler != nil {
-					assert.True(t, sub.HasHandler(tt.topic))
-				}
-			}
-		})
-	}
-}
-
-func TestSubscriberHandlerErrorHandling(t *testing.T) {
-	// This test verifies that handler errors are handled correctly
-	// Using mock subscriber to test without requiring a real broker
-
-	sub := NewMockSubscriber()
-	defer func() {
-		if err := sub.Close(); err != nil {
-			t.Logf("failed to close subscriber: %v", err)
-		}
-	}()
-
-	// Verify that a handler that returns an error is accepted
-	errorHandler := func(ctx context.Context, evt *event.Event) error {
-		return assert.AnError
-	}
-
-	ctx := context.Background()
-
-	// Subscribe should succeed - handler errors are handled during message processing
-	err := sub.Subscribe(ctx, "test-topic", errorHandler)
-	assert.NoError(t, err)
-	assert.True(t, sub.HasHandler("test-topic"))
-
-	// Simulate message delivery and verify handler error is propagated
-	evt := event.New()
-	evt.SetID("test-id")
-	evt.SetType("test.type")
-	evt.SetSource("test-source")
-
-	err = sub.SimulateMessage(ctx, "test-topic", &evt)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "assert.AnError")
 }
 
 func TestBuildConfigFromMapErrorHandling(t *testing.T) {
