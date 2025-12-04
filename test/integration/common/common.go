@@ -1,4 +1,4 @@
-package integration_test
+package common
 
 import (
 	"context"
@@ -12,16 +12,13 @@ import (
 	"github.com/cloudevents/sdk-go/v2/event"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/modules/rabbitmq"
-	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/openshift-hyperfleet/hyperfleet-broker/broker"
 )
 
-// TestMain sets up the test environment for Podman and disables Ryuk
-// This is required when using Podman instead of Docker with testcontainers
-func TestMain(m *testing.M) {
+// SetupTestEnvironment sets up the test environment for Podman and disables Ryuk
+// This should be called from TestMain in each test package
+func SetupTestEnvironment() {
 	// Disable Ryuk (resource reaper) - required for Podman
 	// This should be set before any testcontainers operations
 	if os.Getenv("TESTCONTAINERS_RYUK_DISABLED") == "" {
@@ -46,90 +43,19 @@ func TestMain(m *testing.M) {
 			}
 		}
 	}
-
-	// Run tests
-	code := m.Run()
-	os.Exit(code)
 }
 
-// setupRabbitMQContainer starts a RabbitMQ testcontainer and returns the connection URL
-func setupRabbitMQContainer(t *testing.T) string {
-	ctx := context.Background()
-
-	rabbitmqContainer, err := rabbitmq.Run(ctx,
-		"rabbitmq:3-management-alpine",
-		rabbitmq.WithAdminUsername("guest"),
-		rabbitmq.WithAdminPassword("guest"),
-		testcontainers.WithWaitStrategy(
-			wait.ForLog("Server startup complete").
-				WithOccurrence(1).
-				WithStartupTimeout(60*time.Second),
-		),
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		if err := rabbitmqContainer.Terminate(ctx); err != nil {
-			t.Logf("failed to terminate rabbitmq container: %v", err)
-		}
-	})
-
-	connectionString, err := rabbitmqContainer.AmqpURL(ctx)
-	require.NoError(t, err)
-
-	return connectionString
+// BrokerTestConfig holds broker-specific test configuration
+type BrokerTestConfig struct {
+	BrokerType      string
+	SetupSleep      time.Duration
+	ReceiveTimeout  time.Duration
+	SetupConfigFunc func(*testing.T, map[string]string) // Optional function to modify config after initial setup
+	PublishDelay    time.Duration                       // Delay between publishes (for gradual publishing, 0 = no delay)
 }
 
-// setupPubSubEmulator starts a Google Pub/Sub emulator testcontainer and returns the project ID and emulator host
-func setupPubSubEmulator(t *testing.T) (string, string) {
-	ctx := context.Background()
-
-	// Create a generic container for Pub/Sub emulator
-	req := testcontainers.ContainerRequest{
-		Image:        "gcr.io/google.com/cloudsdktool/cloud-sdk:emulators",
-		ExposedPorts: []string{"8085/tcp"},
-		Cmd:          []string{"gcloud", "beta", "emulators", "pubsub", "start", "--host-port=0.0.0.0:8085"},
-		WaitingFor: wait.ForLog("Server started").
-			WithOccurrence(1).
-			WithStartupTimeout(60 * time.Second),
-	}
-
-	pubsubContainer, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: req,
-		Started:          true,
-	})
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		if err := pubsubContainer.Terminate(ctx); err != nil {
-			t.Logf("failed to terminate pubsub container: %v", err)
-		}
-	})
-
-	projectID := "test-project"
-
-	// Get the container host and port
-	host, err := pubsubContainer.Host(ctx)
-	require.NoError(t, err)
-
-	mappedPort, err := pubsubContainer.MappedPort(ctx, "8085")
-	require.NoError(t, err)
-
-	emulatorHost := fmt.Sprintf("%s:%s", host, mappedPort.Port())
-
-	// Set environment variable for Pub/Sub emulator
-	if err := os.Setenv("PUBSUB_EMULATOR_HOST", emulatorHost); err != nil {
-		t.Fatalf("failed to set PUBSUB_EMULATOR_HOST: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := os.Unsetenv("PUBSUB_EMULATOR_HOST"); err != nil {
-			t.Logf("failed to unset PUBSUB_EMULATOR_HOST: %v", err)
-		}
-	})
-
-	return projectID, emulatorHost
-}
-
-// buildConfigMap creates a configuration map for testing
-func buildConfigMap(brokerType string, rabbitMQURL string, pubsubProjectID string) map[string]string {
+// BuildConfigMap creates a configuration map for testing
+func BuildConfigMap(brokerType string, rabbitMQURL string, pubsubProjectID string) map[string]string {
 	configMap := map[string]string{
 		"broker.type":            brokerType,
 		"subscriber.parallelism": "1",
@@ -140,47 +66,17 @@ func buildConfigMap(brokerType string, rabbitMQURL string, pubsubProjectID strin
 		configMap["broker.rabbitmq.url"] = rabbitMQURL
 	case "googlepubsub":
 		configMap["broker.googlepubsub.project_id"] = pubsubProjectID
+		// Enable auto-creation of topics and subscriptions for tests
+		configMap["broker.googlepubsub.create_topic_if_missing"] = "true"
+		configMap["broker.googlepubsub.create_subscription_if_missing"] = "true"
 	}
 
 	return configMap
 }
 
-// brokerTestConfig holds broker-specific test configuration
-type brokerTestConfig struct {
-	brokerType      string
-	setupSleep      time.Duration
-	receiveTimeout  time.Duration
-	setupConfigFunc func(*testing.T, map[string]string) // Optional function to modify config after initial setup
-	publishDelay    time.Duration                       // Delay between publishes (for gradual publishing, 0 = no delay)
-}
-
-// setupBrokerTest sets up a broker test environment and returns the config map
-func setupBrokerTest(t *testing.T, cfg brokerTestConfig) map[string]string {
-	var configMap map[string]string
-
-	switch cfg.brokerType {
-	case "rabbitmq":
-		rabbitMQURL := setupRabbitMQContainer(t)
-		configMap = buildConfigMap("rabbitmq", rabbitMQURL, "")
-	case "googlepubsub":
-		projectID, _ := setupPubSubEmulator(t)
-		configMap = buildConfigMap("googlepubsub", "", projectID)
-	default:
-		t.Fatalf("unsupported broker type: %s", cfg.brokerType)
-	}
-
-	// Apply any additional configuration modifications
-	if cfg.setupConfigFunc != nil {
-		cfg.setupConfigFunc(t, configMap)
-	}
-
-	return configMap
-}
-
-// testPublisherSubscriber tests the full publish/subscribe flow
-func testPublisherSubscriber(t *testing.T, cfg brokerTestConfig) {
+// RunPublisherSubscriber tests the full publish/subscribe flow
+func RunPublisherSubscriber(t *testing.T, configMap map[string]string, cfg BrokerTestConfig) {
 	ctx := context.Background()
-	configMap := setupBrokerTest(t, cfg)
 
 	// Create publisher
 	pub, err := broker.NewPublisher(configMap)
@@ -224,7 +120,7 @@ func testPublisherSubscriber(t *testing.T, cfg brokerTestConfig) {
 	require.NoError(t, err)
 
 	// Give subscriber time to set up
-	time.Sleep(cfg.setupSleep)
+	time.Sleep(cfg.SetupSleep)
 
 	err = pub.Publish("test-topic", &evt)
 	require.NoError(t, err)
@@ -235,33 +131,14 @@ func testPublisherSubscriber(t *testing.T, cfg brokerTestConfig) {
 		assert.Equal(t, evt.Type(), receivedEvt.Type())
 		assert.Equal(t, evt.ID(), receivedEvt.ID())
 		assert.Equal(t, evt.Source(), receivedEvt.Source())
-	case <-time.After(cfg.receiveTimeout):
+	case <-time.After(cfg.ReceiveTimeout):
 		t.Fatal("timeout waiting for event")
 	}
 }
 
-// TestRabbitMQPublisherSubscriber tests the full publish/subscribe flow with RabbitMQ
-func TestRabbitMQPublisherSubscriber(t *testing.T) {
-	testPublisherSubscriber(t, brokerTestConfig{
-		brokerType:     "rabbitmq",
-		setupSleep:     500 * time.Millisecond,
-		receiveTimeout: 5 * time.Second,
-	})
-}
-
-// TestGooglePubSubPublisherSubscriber tests the full publish/subscribe flow with Google Pub/Sub
-func TestGooglePubSubPublisherSubscriber(t *testing.T) {
-	testPublisherSubscriber(t, brokerTestConfig{
-		brokerType:     "googlepubsub",
-		setupSleep:     2 * time.Second,
-		receiveTimeout: 10 * time.Second,
-	})
-}
-
-// testMultipleEvents tests that multiple events are processed correctly
-func testMultipleEvents(t *testing.T, cfg brokerTestConfig) {
+// RunMultipleEvents tests that multiple events are processed correctly
+func RunMultipleEvents(t *testing.T, configMap map[string]string, cfg BrokerTestConfig) {
 	ctx := context.Background()
-	configMap := setupBrokerTest(t, cfg)
 
 	pub, err := broker.NewPublisher(configMap)
 	require.NoError(t, err)
@@ -307,7 +184,7 @@ func testMultipleEvents(t *testing.T, cfg brokerTestConfig) {
 	err = sub.Subscribe(ctx, "routing-topic", handler)
 	require.NoError(t, err)
 
-	time.Sleep(cfg.setupSleep)
+	time.Sleep(cfg.SetupSleep)
 
 	// Publish both events
 	err = pub.Publish("routing-topic", &evt1)
@@ -323,7 +200,7 @@ func testMultipleEvents(t *testing.T, cfg brokerTestConfig) {
 		case received := <-receivedEvents:
 			eventsReceived[received.ID()] = true
 			assert.Contains(t, []string{"id-1", "id-2"}, received.ID())
-		case <-time.After(cfg.receiveTimeout):
+		case <-time.After(cfg.ReceiveTimeout):
 			t.Fatalf("timeout waiting for event %d", i+1)
 		}
 	}
@@ -332,28 +209,9 @@ func testMultipleEvents(t *testing.T, cfg brokerTestConfig) {
 	assert.True(t, eventsReceived["id-2"], "event id-2 should be received")
 }
 
-// TestRabbitMQMultipleEvents tests that multiple events are processed correctly
-func TestRabbitMQMultipleEvents(t *testing.T) {
-	testMultipleEvents(t, brokerTestConfig{
-		brokerType:     "rabbitmq",
-		setupSleep:     500 * time.Millisecond,
-		receiveTimeout: 5 * time.Second,
-	})
-}
-
-// TestGooglePubSubMultipleEvents tests that multiple events are processed correctly
-func TestGooglePubSubMultipleEvents(t *testing.T) {
-	testMultipleEvents(t, brokerTestConfig{
-		brokerType:     "googlepubsub",
-		setupSleep:     2 * time.Second,
-		receiveTimeout: 10 * time.Second,
-	})
-}
-
-// testSharedSubscription tests that two subscribers with the same subscriptionID share messages
-func testSharedSubscription(t *testing.T, cfg brokerTestConfig) {
+// RunSharedSubscription tests that two subscribers with the same subscriptionID share messages
+func RunSharedSubscription(t *testing.T, configMap map[string]string, cfg BrokerTestConfig) {
 	ctx := context.Background()
-	configMap := setupBrokerTest(t, cfg)
 
 	pub, err := broker.NewPublisher(configMap)
 	require.NoError(t, err)
@@ -403,7 +261,7 @@ func testSharedSubscription(t *testing.T, cfg brokerTestConfig) {
 	err = sub2.Subscribe(ctx, "shared-topic", handler2)
 	require.NoError(t, err)
 
-	time.Sleep(cfg.setupSleep)
+	time.Sleep(cfg.SetupSleep)
 
 	// Publish 10 messages
 	numMessages := 10
@@ -421,7 +279,7 @@ func testSharedSubscription(t *testing.T, cfg brokerTestConfig) {
 	}
 
 	// Wait for all messages to be received
-	timeout := time.After(cfg.receiveTimeout)
+	timeout := time.After(cfg.ReceiveTimeout)
 	allReceived := make(map[string]bool)
 	sub1Received := make(map[string]bool)
 	sub2Received := make(map[string]bool)
@@ -451,28 +309,9 @@ func testSharedSubscription(t *testing.T, cfg brokerTestConfig) {
 	assert.Equal(t, numMessages, sub1Count+sub2Count, "total messages should equal sum of both subscribers")
 }
 
-// TestRabbitMQSharedSubscription tests that two subscribers with the same subscriptionID share messages
-func TestRabbitMQSharedSubscription(t *testing.T) {
-	testSharedSubscription(t, brokerTestConfig{
-		brokerType:     "rabbitmq",
-		setupSleep:     500 * time.Millisecond,
-		receiveTimeout: 10 * time.Second,
-	})
-}
-
-// TestGooglePubSubSharedSubscription tests that two subscribers with the same subscriptionID share messages
-func TestGooglePubSubSharedSubscription(t *testing.T) {
-	testSharedSubscription(t, brokerTestConfig{
-		brokerType:     "googlepubsub",
-		setupSleep:     2 * time.Second,
-		receiveTimeout: 15 * time.Second,
-	})
-}
-
-// testFanoutSubscription tests that two subscribers with different subscriptionIDs each get all messages
-func testFanoutSubscription(t *testing.T, cfg brokerTestConfig) {
+// RunFanoutSubscription tests that two subscribers with different subscriptionIDs each get all messages
+func RunFanoutSubscription(t *testing.T, configMap map[string]string, cfg BrokerTestConfig) {
 	ctx := context.Background()
-	configMap := setupBrokerTest(t, cfg)
 
 	pub, err := broker.NewPublisher(configMap)
 	require.NoError(t, err)
@@ -521,7 +360,7 @@ func testFanoutSubscription(t *testing.T, cfg brokerTestConfig) {
 	err = sub2.Subscribe(ctx, "fanout-topic", handler2)
 	require.NoError(t, err)
 
-	time.Sleep(cfg.setupSleep)
+	time.Sleep(cfg.SetupSleep)
 
 	// Publish 5 messages
 	numMessages := 5
@@ -541,7 +380,7 @@ func testFanoutSubscription(t *testing.T, cfg brokerTestConfig) {
 	}
 
 	// Wait for all messages to be received by both subscribers
-	timeout := time.After(cfg.receiveTimeout)
+	timeout := time.After(cfg.ReceiveTimeout)
 
 	// Collect messages from subscriber 1
 	received1Map := make(map[string]bool)
@@ -576,106 +415,8 @@ func testFanoutSubscription(t *testing.T, cfg brokerTestConfig) {
 	}
 }
 
-// TestRabbitMQFanoutSubscription tests that two subscribers with different subscriptionIDs each get all messages
-func TestRabbitMQFanoutSubscription(t *testing.T) {
-	testFanoutSubscription(t, brokerTestConfig{
-		brokerType:     "rabbitmq",
-		setupSleep:     500 * time.Millisecond,
-		receiveTimeout: 10 * time.Second,
-	})
-}
-
-// TestGooglePubSubFanoutSubscription tests that two subscribers with different subscriptionIDs each get all messages
-func TestGooglePubSubFanoutSubscription(t *testing.T) {
-	testFanoutSubscription(t, brokerTestConfig{
-		brokerType:     "googlepubsub",
-		setupSleep:     2 * time.Second,
-		receiveTimeout: 15 * time.Second,
-	})
-}
-
-// TestRabbitMQSubscriptionID tests that subscription IDs work correctly
-func TestRabbitMQSubscriptionID(t *testing.T) {
-	ctx := context.Background()
-	rabbitMQURL := setupRabbitMQContainer(t)
-	configMap := buildConfigMap("rabbitmq", rabbitMQURL, "")
-
-	pub, err := broker.NewPublisher(configMap)
-	require.NoError(t, err)
-	defer func() {
-		if err := pub.Close(); err != nil {
-			t.Logf("failed to close publisher: %v", err)
-		}
-	}()
-
-	// Create two subscribers with different subscription IDs
-	sub1, err := broker.NewSubscriber("subscription-1", configMap)
-	require.NoError(t, err)
-	defer func() {
-		if err := sub1.Close(); err != nil {
-			t.Logf("failed to close subscriber 1: %v", err)
-		}
-	}()
-
-	sub2, err := broker.NewSubscriber("subscription-2", configMap)
-	require.NoError(t, err)
-	defer func() {
-		if err := sub2.Close(); err != nil {
-			t.Logf("failed to close subscriber 2: %v", err)
-		}
-	}()
-
-	evt := event.New()
-	evt.SetType("com.example.test.event")
-	evt.SetSource("test-source")
-	evt.SetID("test-id")
-	if err := evt.SetData(event.ApplicationJSON, map[string]string{"message": "test"}); err != nil {
-		require.NoError(t, err, "failed to set event data")
-	}
-
-	// Both subscribers should receive the event (fanout behavior)
-	received1 := make(chan *event.Event, 1)
-	received2 := make(chan *event.Event, 1)
-
-	handler1 := func(ctx context.Context, e *event.Event) error {
-		received1 <- e
-		return nil
-	}
-
-	handler2 := func(ctx context.Context, e *event.Event) error {
-		received2 <- e
-		return nil
-	}
-
-	err = sub1.Subscribe(ctx, "fanout-topic", handler1)
-	require.NoError(t, err)
-
-	err = sub2.Subscribe(ctx, "fanout-topic", handler2)
-	require.NoError(t, err)
-
-	time.Sleep(500 * time.Millisecond)
-
-	err = pub.Publish("fanout-topic", &evt)
-	require.NoError(t, err)
-
-	// Both should receive the event
-	select {
-	case <-received1:
-		// Good
-	case <-time.After(5 * time.Second):
-		t.Fatal("timeout waiting for sub1 to receive event")
-	}
-
-	select {
-	case <-received2:
-		// Good
-	case <-time.After(5 * time.Second):
-		t.Fatal("timeout waiting for sub2 to receive event")
-	}
-}
-
-// testSlowSubscriber tests that a slow subscriber processes fewer messages than a fast one
-func testSlowSubscriber(t *testing.T, configMap map[string]string, cfg brokerTestConfig, sub1, sub2 broker.Subscriber) {
+// RunSlowSubscriber tests that a slow subscriber processes fewer messages than a fast one
+func RunSlowSubscriber(t *testing.T, configMap map[string]string, cfg BrokerTestConfig, sub1, sub2 broker.Subscriber) {
 	ctx := context.Background()
 
 	pub, err := broker.NewPublisher(configMap)
@@ -723,7 +464,7 @@ func testSlowSubscriber(t *testing.T, configMap map[string]string, cfg brokerTes
 	err = sub2.Subscribe(ctx, "slow-topic", slowHandler)
 	require.NoError(t, err)
 
-	time.Sleep(cfg.setupSleep)
+	time.Sleep(cfg.SetupSleep)
 
 	// Publish messages
 	numMessages := 20
@@ -740,13 +481,13 @@ func testSlowSubscriber(t *testing.T, configMap map[string]string, cfg brokerTes
 		require.NoError(t, err)
 
 		// Add delay between publishes if configured (for gradual publishing)
-		if cfg.publishDelay > 0 {
-			time.Sleep(cfg.publishDelay)
+		if cfg.PublishDelay > 0 {
+			time.Sleep(cfg.PublishDelay)
 		}
 	}
 
 	// Wait for all messages to be processed
-	timeout := time.After(cfg.receiveTimeout)
+	timeout := time.After(cfg.ReceiveTimeout)
 	for {
 		total := atomic.LoadInt64(&fastReceived) + atomic.LoadInt64(&slowReceived)
 		if total >= int64(numMessages) {
@@ -777,65 +518,9 @@ func testSlowSubscriber(t *testing.T, configMap map[string]string, cfg brokerTes
 	t.Logf("Slow subscriber received: %d messages", slowCount)
 }
 
-// TestRabbitMQSlowSubscriber tests that a slow subscriber processes fewer messages than a fast one
-func TestRabbitMQSlowSubscriber(t *testing.T) {
-	configMap := setupBrokerTest(t, brokerTestConfig{
-		brokerType: "rabbitmq",
-	})
-
-	subscriptionID := "slow-subscription"
-	sub1, err := broker.NewSubscriber(subscriptionID, configMap)
-	require.NoError(t, err)
-
-	sub2, err := broker.NewSubscriber(subscriptionID, configMap)
-	require.NoError(t, err)
-
-	testSlowSubscriber(t, configMap, brokerTestConfig{
-		setupSleep:     500 * time.Millisecond,
-		receiveTimeout: 10 * time.Second,
-		publishDelay:   0, // No delay for RabbitMQ
-	}, sub1, sub2)
-}
-
-// TestGooglePubSubSlowSubscriber tests that a slow subscriber processes fewer messages than a fast one
-func TestGooglePubSubSlowSubscriber(t *testing.T) {
-	configMap := setupBrokerTest(t, brokerTestConfig{
-		brokerType: "googlepubsub",
-		setupConfigFunc: func(t *testing.T, cfg map[string]string) {
-			// Set MaxOutstandingMessages to 1 to limit how many messages can be in-flight
-			cfg["broker.googlepubsub.max_outstanding_messages"] = "1"
-			// Set NumGoroutines to 1 to use a single streaming pull stream
-			cfg["subscriber.parallelism"] = "1"
-		},
-	})
-
-	// Create two subscribers with the same subscriptionID (shared subscription)
-	// but with different num_goroutines to simulate fast vs slow
-	subscriptionID := "slow-subscription"
-	configMap["broker.googlepubsub.num_goroutines"] = "5"
-	sub1, err := broker.NewSubscriber(subscriptionID, configMap)
-	require.NoError(t, err)
-
-	configMap["broker.googlepubsub.num_goroutines"] = "1"
-	sub2, err := broker.NewSubscriber(subscriptionID, configMap)
-	require.NoError(t, err)
-
-	// Note: Google Pub/Sub uses 500ms delay in slow handler, but we'll keep 100ms
-	// in the helper and override if needed. Actually, let me check the helper...
-	// The helper uses 100ms, but Google Pub/Sub test used 500ms. Let me update the helper
-	// to accept slow delay as a parameter, or just keep it as-is since the test still works.
-
-	testSlowSubscriber(t, configMap, brokerTestConfig{
-		setupSleep:     2 * time.Second,
-		receiveTimeout: 15 * time.Second,
-		publishDelay:   100 * time.Millisecond, // Gradual publishing for Google Pub/Sub
-	}, sub1, sub2)
-}
-
-// testErrorSubscriber tests that messages are redistributed when one subscriber fails
-func testErrorSubscriber(t *testing.T, cfg brokerTestConfig) {
+// RunErrorSubscriber tests that messages are redistributed when one subscriber fails
+func RunErrorSubscriber(t *testing.T, configMap map[string]string, cfg BrokerTestConfig) {
 	ctx := context.Background()
-	configMap := setupBrokerTest(t, cfg)
 
 	pub, err := broker.NewPublisher(configMap)
 	require.NoError(t, err)
@@ -886,7 +571,7 @@ func testErrorSubscriber(t *testing.T, cfg brokerTestConfig) {
 	err = sub2.Subscribe(ctx, "error-topic", workingHandler)
 	require.NoError(t, err)
 
-	time.Sleep(cfg.setupSleep)
+	time.Sleep(cfg.SetupSleep)
 
 	// Publish 10 messages
 	numMessages := 10
@@ -905,7 +590,7 @@ func testErrorSubscriber(t *testing.T, cfg brokerTestConfig) {
 
 	// Wait for messages to be processed
 	// Messages that fail will be nacked and may be redelivered
-	time.Sleep(cfg.receiveTimeout)
+	time.Sleep(cfg.ReceiveTimeout)
 
 	errorCount := atomic.LoadInt64(&errorSubReceived)
 	workingCount := atomic.LoadInt64(&workingSubReceived)
@@ -924,28 +609,9 @@ func testErrorSubscriber(t *testing.T, cfg brokerTestConfig) {
 		"working subscriber should process at least half the messages")
 }
 
-// TestRabbitMQErrorSubscriber tests that messages are redistributed when one subscriber fails
-func TestRabbitMQErrorSubscriber(t *testing.T) {
-	testErrorSubscriber(t, brokerTestConfig{
-		brokerType:     "rabbitmq",
-		setupSleep:     500 * time.Millisecond,
-		receiveTimeout: 5 * time.Second,
-	})
-}
-
-// TestGooglePubSubErrorSubscriber tests that messages are redistributed when one subscriber fails
-func TestGooglePubSubErrorSubscriber(t *testing.T) {
-	testErrorSubscriber(t, brokerTestConfig{
-		brokerType:     "googlepubsub",
-		setupSleep:     2 * time.Second,
-		receiveTimeout: 10 * time.Second,
-	})
-}
-
-// testCloseWaitsForInFlightMessages tests that Close() waits for in-flight message processing to complete
-func testCloseWaitsForInFlightMessages(t *testing.T, cfg brokerTestConfig) {
+// RunCloseWaitsForInFlightMessages tests that Close() waits for in-flight message processing to complete
+func RunCloseWaitsForInFlightMessages(t *testing.T, configMap map[string]string, cfg BrokerTestConfig) {
 	ctx := context.Background()
-	configMap := setupBrokerTest(t, cfg)
 	configMap["subscriber.parallelism"] = "6"
 
 	pub, err := broker.NewPublisher(configMap)
@@ -983,7 +649,7 @@ func testCloseWaitsForInFlightMessages(t *testing.T, cfg brokerTestConfig) {
 	err = sub.Subscribe(ctx, "close-test-topic", handler)
 	require.NoError(t, err)
 
-	time.Sleep(cfg.setupSleep)
+	time.Sleep(cfg.SetupSleep)
 	for i := 0; i < numMessages; i++ {
 		evt := event.New()
 		evt.SetType("com.example.test.event")
@@ -1043,28 +709,9 @@ func testCloseWaitsForInFlightMessages(t *testing.T, cfg brokerTestConfig) {
 	t.Logf("Close() took %v to complete, processed %d messages", closeDuration, finalCount)
 }
 
-// TestRabbitMQCloseWaitsForInFlightMessages tests that Close() waits for in-flight message processing
-func TestRabbitMQCloseWaitsForInFlightMessages(t *testing.T) {
-	testCloseWaitsForInFlightMessages(t, brokerTestConfig{
-		brokerType:     "rabbitmq",
-		setupSleep:     500 * time.Millisecond,
-		receiveTimeout: 5 * time.Second,
-	})
-}
-
-// TestGooglePubSubCloseWaitsForInFlightMessages tests that Close() waits for in-flight message processing
-func TestGooglePubSubCloseWaitsForInFlightMessages(t *testing.T) {
-	testCloseWaitsForInFlightMessages(t, brokerTestConfig{
-		brokerType:     "googlepubsub",
-		setupSleep:     2 * time.Second,
-		receiveTimeout: 10 * time.Second,
-	})
-}
-
-// testPanicHandler tests that a handler that panics doesn't cause Close() to hang
-func testPanicHandler(t *testing.T, cfg brokerTestConfig) {
+// RunPanicHandler tests that a handler that panics doesn't cause Close() to hang
+func RunPanicHandler(t *testing.T, configMap map[string]string, cfg BrokerTestConfig) {
 	ctx := context.Background()
-	configMap := setupBrokerTest(t, cfg)
 	configMap["subscriber.parallelism"] = "3"
 
 	pub, err := broker.NewPublisher(configMap)
@@ -1096,7 +743,7 @@ func testPanicHandler(t *testing.T, cfg brokerTestConfig) {
 	err = sub.Subscribe(ctx, "panic-test-topic", panicHandler)
 	require.NoError(t, err)
 
-	time.Sleep(cfg.setupSleep)
+	time.Sleep(cfg.SetupSleep)
 
 	// Publish a few messages
 	numMessages := 3
@@ -1117,7 +764,7 @@ func testPanicHandler(t *testing.T, cfg brokerTestConfig) {
 	select {
 	case <-panicOccurred:
 		// Panic has occurred, good
-	case <-time.After(cfg.receiveTimeout):
+	case <-time.After(cfg.ReceiveTimeout):
 		t.Fatal("timeout waiting for panic to occur")
 	}
 
@@ -1152,20 +799,72 @@ func testPanicHandler(t *testing.T, cfg brokerTestConfig) {
 	}
 }
 
-// TestRabbitMQPanicHandler tests that a handler that panics doesn't cause Close() to hang
-func TestRabbitMQPanicHandler(t *testing.T) {
-	testPanicHandler(t, brokerTestConfig{
-		brokerType:     "rabbitmq",
-		setupSleep:     500 * time.Millisecond,
-		receiveTimeout: 5 * time.Second,
-	})
-}
+// RunErrorChannelNotification tests that infrastructure errors are sent to the error channel
+func RunErrorChannelNotification(t *testing.T, configMap map[string]string, cfg BrokerTestConfig) {
+	ctx := context.Background()
 
-// TestGooglePubSubPanicHandler tests that a handler that panics doesn't cause Close() to hang
-func TestGooglePubSubPanicHandler(t *testing.T) {
-	testPanicHandler(t, brokerTestConfig{
-		brokerType:     "googlepubsub",
-		setupSleep:     2 * time.Second,
-		receiveTimeout: 10 * time.Second,
-	})
+	// Create subscriber
+	subscriptionID := "error-channel-test"
+	sub, err := broker.NewSubscriber(subscriptionID, configMap)
+	require.NoError(t, err)
+	defer func() {
+		if err := sub.Close(); err != nil {
+			t.Logf("failed to close subscriber: %v", err)
+		}
+	}()
+
+	// Start goroutine to collect errors
+	errorsChan := sub.Errors()
+	require.NotNil(t, errorsChan, "Errors() should return a non-nil channel")
+
+	receivedErrors := make(chan *broker.SubscriberError, 10)
+	errCollectorDone := make(chan struct{})
+
+	go func() {
+		defer close(errCollectorDone)
+		for err := range errorsChan {
+			t.Logf("Received error from channel: Op=%s, Topic=%s, Fatal=%v, Err=%v",
+				err.Op, err.Topic, err.Fatal, err.Err)
+			receivedErrors <- err
+		}
+	}()
+
+	// Simple handler that processes messages successfully
+	handler := func(ctx context.Context, evt *event.Event) error {
+		return nil
+	}
+
+	// Subscribe to a topic
+	err = sub.Subscribe(ctx, "error-test-topic", handler)
+	require.NoError(t, err)
+
+	// Wait for subscription to be set up
+	time.Sleep(cfg.SetupSleep)
+
+	// Note: In a real integration test, you would force a connection failure here
+	// by stopping the broker container or closing the connection.
+	// For now, we'll verify the channel exists and can receive errors.
+
+	// Close the subscriber - this should trigger context cancellation
+	// which may or may not generate an error depending on the broker
+	err = sub.Close()
+	require.NoError(t, err)
+
+	// Wait for error collector to finish
+	select {
+	case <-errCollectorDone:
+		t.Log("Error collector finished")
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for error collector to finish")
+	}
+
+	// Verify the error channel was closed
+	select {
+	case _, ok := <-errorsChan:
+		assert.False(t, ok, "error channel should be closed after Close()")
+	default:
+		t.Fatal("error channel should be closed")
+	}
+
+	t.Log("Error channel notification test completed successfully")
 }

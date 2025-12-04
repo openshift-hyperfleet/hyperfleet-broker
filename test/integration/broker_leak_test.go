@@ -1,4 +1,4 @@
-package broker
+package integration_test
 
 import (
 	"context"
@@ -13,100 +13,20 @@ import (
 	"github.com/cloudevents/sdk-go/v2/event"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/modules/rabbitmq"
-	"github.com/testcontainers/testcontainers-go/wait"
+
+	"github.com/openshift-hyperfleet/hyperfleet-broker/broker"
+	"github.com/openshift-hyperfleet/hyperfleet-broker/test/integration/common"
+	pubsub "github.com/openshift-hyperfleet/hyperfleet-broker/test/integration/googlepubsub"
+	"github.com/openshift-hyperfleet/hyperfleet-broker/test/integration/rabbitmq"
 )
 
-func setupRabbitMQContainer(t *testing.T) string {
-	ctx := context.Background()
+// TestMain sets up the test environment for Podman and disables Ryuk
+func TestMain(m *testing.M) {
+	common.SetupTestEnvironment()
 
-	rabbitmqContainer, err := rabbitmq.Run(ctx,
-		"rabbitmq:3",
-		rabbitmq.WithAdminUsername("guest"),
-		rabbitmq.WithAdminPassword("guest"),
-		testcontainers.WithWaitStrategy(
-			wait.ForLog("Server startup complete").
-				WithOccurrence(1).
-				WithStartupTimeout(60*time.Second),
-		),
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		if err := rabbitmqContainer.Terminate(ctx); err != nil {
-			t.Logf("failed to terminate rabbitmq container: %v", err)
-		}
-	})
-
-	connectionString, err := rabbitmqContainer.AmqpURL(ctx)
-	require.NoError(t, err)
-
-	return connectionString
-}
-
-// setupPubSubEmulator starts a Google Pub/Sub emulator testcontainer and returns the project ID and emulator host
-func setupPubSubEmulator(t *testing.T) (string, string) {
-	ctx := context.Background()
-
-	// Create a generic container for Pub/Sub emulator
-	req := testcontainers.ContainerRequest{
-		Image:        "gcr.io/google.com/cloudsdktool/cloud-sdk:emulators",
-		ExposedPorts: []string{"8085/tcp"},
-		Cmd:          []string{"gcloud", "beta", "emulators", "pubsub", "start", "--host-port=0.0.0.0:8085"},
-		WaitingFor: wait.ForLog("Server started").
-			WithOccurrence(1).
-			WithStartupTimeout(60 * time.Second),
-	}
-
-	pubsubContainer, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: req,
-		Started:          true,
-	})
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		if err := pubsubContainer.Terminate(ctx); err != nil {
-			t.Logf("failed to terminate pubsub container: %v", err)
-		}
-	})
-
-	projectID := "test-project"
-
-	// Get the container host and port
-	host, err := pubsubContainer.Host(ctx)
-	require.NoError(t, err)
-
-	mappedPort, err := pubsubContainer.MappedPort(ctx, "8085")
-	require.NoError(t, err)
-
-	emulatorHost := fmt.Sprintf("%s:%s", host, mappedPort.Port())
-
-	// Set environment variable for Pub/Sub emulator
-	if err := os.Setenv("PUBSUB_EMULATOR_HOST", emulatorHost); err != nil {
-		t.Fatalf("failed to set PUBSUB_EMULATOR_HOST: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := os.Unsetenv("PUBSUB_EMULATOR_HOST"); err != nil {
-			t.Logf("failed to unset PUBSUB_EMULATOR_HOST: %v", err)
-		}
-	})
-
-	return projectID, emulatorHost
-}
-
-func buildConfigMap(brokerType string, rabbitMQURL string, pubsubProjectID string) map[string]string {
-	configMap := map[string]string{
-		"broker.type":            brokerType,
-		"subscriber.parallelism": "1",
-	}
-
-	switch brokerType {
-	case "rabbitmq":
-		configMap["broker.rabbitmq.url"] = rabbitMQURL
-	case "googlepubsub":
-		configMap["broker.googlepubsub.project_id"] = pubsubProjectID
-	}
-
-	return configMap
+	// Run tests
+	code := m.Run()
+	os.Exit(code)
 }
 
 // brokerTestConfig holds broker-specific test configuration
@@ -122,11 +42,11 @@ func setupBrokerTest(t *testing.T, cfg brokerTestConfig) map[string]string {
 
 	switch cfg.brokerType {
 	case "rabbitmq":
-		rabbitMQURL := setupRabbitMQContainer(t)
-		configMap = buildConfigMap("rabbitmq", rabbitMQURL, "")
+		rabbitMQURL := rabbitmq.SetupRabbitMQContainer(t)
+		configMap = common.BuildConfigMap("rabbitmq", rabbitMQURL, "")
 	case "googlepubsub":
-		projectID, _ := setupPubSubEmulator(t)
-		configMap = buildConfigMap("googlepubsub", "", projectID)
+		projectID, _ := pubsub.SetupPubSubEmulator(t)
+		configMap = common.BuildConfigMap("googlepubsub", "", projectID)
 	default:
 		t.Fatalf("unsupported broker type: %s", cfg.brokerType)
 	}
@@ -139,7 +59,7 @@ func setupBrokerTest(t *testing.T, cfg brokerTestConfig) map[string]string {
 // This test WILL FAIL, proving that goroutines are leaked after Close()
 func testGoroutineLeak(t *testing.T, cfg brokerTestConfig) {
 	configMap := setupBrokerTest(t, cfg)
-	pub, err := NewPublisher(configMap)
+	pub, err := broker.NewPublisher(configMap)
 	require.NoError(t, err)
 
 	// Clean up environment
@@ -148,7 +68,7 @@ func testGoroutineLeak(t *testing.T, cfg brokerTestConfig) {
 	before := runtime.NumGoroutine()
 	t.Logf("📊 Goroutines BEFORE: %d", before)
 
-	sub, err := NewSubscriber("leak-demo", configMap)
+	sub, err := broker.NewSubscriber("leak-demo", configMap)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -299,7 +219,7 @@ func testLeakIncreasesWithUsage(t *testing.T, cfg brokerTestConfig) {
 
 			configMap := setupBrokerTest(t, cfg)
 
-			sub, err := NewSubscriber("leak-demo", configMap)
+			sub, err := broker.NewSubscriber("leak-demo", configMap)
 			require.NoError(t, err)
 
 			ctx := context.Background()
@@ -365,10 +285,10 @@ func testMultipleSubscriptionsSameTopic(t *testing.T, cfg brokerTestConfig) {
 	t.Logf("📊 Goroutines BEFORE: %d", before)
 
 	// Create publisher and subscriber
-	pub, err := NewPublisher(configMap)
+	pub, err := broker.NewPublisher(configMap)
 	require.NoError(t, err)
 
-	sub, err := NewSubscriber("same-topic-test", configMap)
+	sub, err := broker.NewSubscriber("same-topic-test", configMap)
 	require.NoError(t, err)
 
 	ctx := context.Background()

@@ -1,9 +1,46 @@
 broker:
   type: googlepubsub
   googlepubsub:
-    project_id: example-project
+    # Connection settings (required)
+    project_id: hcm-hyperfleet
+
+    # Subscription settings
+    # Time for subscriber to acknowledge message (10-600 seconds, default: 10)
+    ack_deadline_seconds: 60
+
+    # How long to retain unacknowledged messages (10m to 31d, default: 7d)
+    # Format: "Ns" (seconds), "Nm" (minutes), "Nh" (hours), "Nd" (days)
+    message_retention_duration: "604800s"  # 7 days
+
+    # Time of inactivity before subscription is deleted (min 1d, or 0 = never expire)
+    expiration_ttl: "2678400s"  # 31 days
+
+    # Enable ordered message delivery by ordering key
+    enable_message_ordering: false
+
+    # Retry policy for failed message delivery
+    retry_min_backoff: "10s"
+    retry_max_backoff: "600s"
+
+    # Dead letter settings (for messages that fail repeatedly)
+    # dead_letter_topic: "my-dead-letter-topic"
+    # dead_letter_max_attempts: 5  # 5-100, default: 5
+
+    # Topic settings
+    # How long the topic retains messages (for replay scenarios, 0 = disabled)
+    # topic_retention_duration: "86400s"  # 1 day
+
+    # Receive settings (client-side flow control)
+    max_outstanding_messages: 1000
+    max_outstanding_bytes: 104857600  # 100MB
+    num_goroutines: 10
+
+    # Behavior flags (default: false - infrastructure must exist)
+    # Set to true to automatically create topics/subscriptions if they don't exist
+    create_topic_if_missing: true
+    create_subscription_if_missing: true
+    dead_letter_topic: "my-dead-letter-topic"
+    dead_letter_max_attempts: 5
 
 subscriber:
-  parallelism: 10
-
-
+  parallelism: 1
