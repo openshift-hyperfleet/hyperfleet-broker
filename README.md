@@ -583,9 +583,35 @@ These files are mounted into the containers and used by the publisher and subscr
 - [RabbitMQ Documentation](https://www.rabbitmq.com/documentation.html)
 - [Google Cloud Pub/Sub Documentation](https://cloud.google.com/pubsub/docs)
 
-# Running tests in vscode
+## Development
 
-As integration tests use testcontainers, they can take a while to execute. 
+### Tool Dependency Management (Bingo)
+
+HyperFleet Broker uses [bingo](https://github.com/bwplotka/bingo) to manage Go tool dependencies with pinned versions.
+
+**Managed tools**:
+- `golangci-lint` - Code linting
+
+**Common operations**:
+```bash
+# Install all tools
+bingo get
+
+# Install a specific tool
+bingo get <tool>
+
+# Update a tool to latest version
+bingo get <tool>@latest
+
+# List all managed tools
+bingo list
+```
+
+Tool versions are tracked in `.bingo/*.mod` files and loaded automatically via `include .bingo/Variables.mk` in the Makefile.
+
+### Running tests in VS Code
+
+As integration tests use testcontainers, they can take a while to execute.
 If executing tests from vscode, you can specify this in your `settings.json` for the workspace
 
 ```
