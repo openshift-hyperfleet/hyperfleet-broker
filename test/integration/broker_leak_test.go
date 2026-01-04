@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/openshift-hyperfleet/hyperfleet-broker/broker"
+	"github.com/openshift-hyperfleet/hyperfleet-broker/pkg/logger"
 	"github.com/openshift-hyperfleet/hyperfleet-broker/test/integration/common"
 	pubsub "github.com/openshift-hyperfleet/hyperfleet-broker/test/integration/googlepubsub"
 	"github.com/openshift-hyperfleet/hyperfleet-broker/test/integration/rabbitmq"
@@ -59,7 +60,7 @@ func setupBrokerTest(t *testing.T, cfg brokerTestConfig) map[string]string {
 // This test WILL FAIL, proving that goroutines are leaked after Close()
 func testGoroutineLeak(t *testing.T, cfg brokerTestConfig) {
 	configMap := setupBrokerTest(t, cfg)
-	pub, err := broker.NewPublisher(configMap)
+	pub, err := broker.NewPublisher(logger.NewTestLogger(), configMap)
 	require.NoError(t, err)
 
 	// Clean up environment
@@ -68,7 +69,7 @@ func testGoroutineLeak(t *testing.T, cfg brokerTestConfig) {
 	before := runtime.NumGoroutine()
 	t.Logf("📊 Goroutines BEFORE: %d", before)
 
-	sub, err := broker.NewSubscriber("leak-demo", configMap)
+	sub, err := broker.NewSubscriber(logger.NewTestLogger(), "leak-demo", configMap)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -97,7 +98,7 @@ func testGoroutineLeak(t *testing.T, cfg brokerTestConfig) {
 			require.NoError(t, err, "failed to set event data")
 		}
 
-		err = pub.Publish("topic-"+strconv.Itoa(i), &evt)
+		err = pub.Publish(context.Background(), "topic-"+strconv.Itoa(i), &evt)
 		require.NoError(t, err)
 	}
 
@@ -209,7 +210,7 @@ func testLeakIncreasesWithUsage(t *testing.T, cfg brokerTestConfig) {
 	}{
 		{1, 4},  // 1 subscription = 4 goroutines
 		{3, 12}, // 3 subscriptions = 12 goroutines
-		{5, 20}, // scriptions = 20 goroutines
+		{5, 20}, // 5 subscriptions = 20 goroutines
 	}
 
 	for _, tc := range testCases {
@@ -219,7 +220,7 @@ func testLeakIncreasesWithUsage(t *testing.T, cfg brokerTestConfig) {
 
 			configMap := setupBrokerTest(t, cfg)
 
-			sub, err := broker.NewSubscriber("leak-demo", configMap)
+			sub, err := broker.NewSubscriber(logger.NewTestLogger(), "leak-demo", configMap)
 			require.NoError(t, err)
 
 			ctx := context.Background()
@@ -285,10 +286,10 @@ func testMultipleSubscriptionsSameTopic(t *testing.T, cfg brokerTestConfig) {
 	t.Logf("📊 Goroutines BEFORE: %d", before)
 
 	// Create publisher and subscriber
-	pub, err := broker.NewPublisher(configMap)
+	pub, err := broker.NewPublisher(logger.NewTestLogger(), configMap)
 	require.NoError(t, err)
 
-	sub, err := broker.NewSubscriber("same-topic-test", configMap)
+	sub, err := broker.NewSubscriber(logger.NewTestLogger(), "same-topic-test", configMap)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -341,7 +342,7 @@ func testMultipleSubscriptionsSameTopic(t *testing.T, cfg brokerTestConfig) {
 			require.NoError(t, err, "failed to set event data")
 		}
 
-		err = pub.Publish(sameTopic, &evt)
+		err = pub.Publish(context.Background(), sameTopic, &evt)
 		require.NoError(t, err)
 	}
 

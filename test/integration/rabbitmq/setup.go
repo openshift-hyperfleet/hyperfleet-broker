@@ -38,5 +38,3 @@ func SetupRabbitMQContainer(t *testing.T) string {
 
 	return connectionString
 }
-
-

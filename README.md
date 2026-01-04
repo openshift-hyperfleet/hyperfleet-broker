@@ -9,6 +9,7 @@ The current implementation uses [Watermill](https://github.com/ThreeDotsLabs/wat
 
 - **Multiple Broker Support**: Works with RabbitMQ and Google Pub/Sub out of the box
 - **CloudEvents Integration**: Built-in support for CloudEvents format with automatic conversion
+- **Logger Integration**: Seamless integration with your application's logger (slog-compatible)
 - **Flexible Configuration**: YAML configuration files with environment variable overrides via Viper
 - **Worker Pools**: Configurable parallel message processing for subscribers
 - **Subscription Management**: Flexible subscription IDs for load balancing (shared subscriptions) or fanout (separate subscriptions)
@@ -18,6 +19,45 @@ The current implementation uses [Watermill](https://github.com/ThreeDotsLabs/wat
 
 ```bash
 go get github.com/openshift-hyperfleet/hyperfleet-broker
+```
+
+## Logger Integration
+
+The broker library requires a logger to be provided when creating publishers and subscribers.
+
+### Logger Interface
+
+Implement the `logger.Logger` interface to use your own logger:
+
+```go
+type Logger interface {
+    Debug(ctx context.Context, message string)
+    Debugf(ctx context.Context, format string, args ...interface{})
+    Info(ctx context.Context, message string)
+    Infof(ctx context.Context, format string, args ...interface{})
+    Warn(ctx context.Context, message string)
+    Warnf(ctx context.Context, format string, args ...interface{})
+    Error(ctx context.Context, message string)
+    Errorf(ctx context.Context, format string, args ...interface{})
+}
+```
+
+This interface matches the HyperFleet adapter logger interface, ensuring consistency across HyperFleet services.
+
+### Usage Examples
+
+```go
+// Use the default logger
+appLogger := logger.NewTestLogger()
+publisher, err := broker.NewPublisher(appLogger)
+
+// Use JSON format for the default logger
+appLogger := logger.NewTestLogger(logger.FormatJSON)
+publisher, err := broker.NewPublisher(appLogger)
+
+// Use your own logger implementation with config
+myLogger := createMyApplicationLogger()
+publisher, err := broker.NewPublisher(myLogger, config)
 ```
 
 ## Quick Start
@@ -36,11 +76,13 @@ import (
     cloudevents "github.com/cloudevents/sdk-go/v2"
     "github.com/cloudevents/sdk-go/v2/event"
     "github.com/openshift-hyperfleet/hyperfleet-broker/broker"
+    "github.com/openshift-hyperfleet/hyperfleet-broker/pkg/logger"
 )
 
 func main() {
-    // Create publisher
-    publisher, err := broker.NewPublisher()
+    // Create logger and publisher
+    appLogger := logger.NewTestLogger()
+    publisher, err := broker.NewPublisher(appLogger)
     if err != nil {
         log.Fatalf("Failed to create publisher: %v", err)
     }
@@ -60,7 +102,7 @@ func main() {
         "timestamp": time.Now().Format(time.RFC3339),
     })
 
-    // Publish to topic
+    // Publish to topic with context
     if err := publisher.Publish(ctx, topic, &evt); err != nil {
         log.Printf("Error publishing event: %v", err)
     } else {
@@ -90,14 +132,16 @@ import (
 
     "github.com/cloudevents/sdk-go/v2/event"
     "github.com/openshift-hyperfleet/hyperfleet-broker/broker"
+    "github.com/openshift-hyperfleet/hyperfleet-broker/pkg/logger"
 )
 
 func main() {
-    // Create subscriber with subscription ID
+    // Create logger and subscriber with subscription ID
     // Subscribers with the same subscription ID share messages (load balancing)
     // Subscribers with different IDs receive all messages (fanout)
+    appLogger := logger.NewTestLogger()
     subscriptionID := "shared-subscription"
-    subscriber, err := broker.NewSubscriber(subscriptionID)
+    subscriber, err := broker.NewSubscriber(appLogger, subscriptionID)
     if err != nil {
         log.Fatalf("Failed to create subscriber: %v", err)
     }
@@ -377,14 +421,15 @@ export SUBSCRIBER_PARALLELISM=20
 You can also provide configuration programmatically using a map:
 
 ```go
+appLogger := logger.NewTestLogger()
 configMap := map[string]string{
     "broker.type": "rabbitmq",
     "broker.rabbitmq.url": "amqp://user:pass@localhost:5672/",
     "subscriber.parallelism": "5",
 }
 
-publisher, err := broker.NewPublisher(configMap)
-subscriber, err := broker.NewSubscriber("my-subscription", configMap)
+publisher, err := broker.NewPublisher(appLogger, configMap)
+subscriber, err := broker.NewSubscriber(appLogger, "my-subscription", configMap)
 ```
 
 </details>

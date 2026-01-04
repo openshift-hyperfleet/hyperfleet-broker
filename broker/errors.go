@@ -37,5 +37,3 @@ func (e *SubscriberError) Error() string {
 func (e *SubscriberError) Unwrap() error {
 	return e.Err
 }
-
-

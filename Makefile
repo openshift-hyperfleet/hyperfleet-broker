@@ -1,12 +1,16 @@
-.PHONY: test test-integration test-all lint
+.PHONY: test test-integration test-all lint fmt
 
 # Run linter
 lint:
 	golangci-lint run ./...
 
-# Run unit tests in the broker folder
+# Format code
+fmt:
+	gofmt -s -w .
+
+# Run unit tests
 test:
-	go test -v ./broker/... -timeout 10m
+	go test -v ./broker/... ./pkg/... -timeout 10m
 
 # Run tests in the test folder
 test-integration:

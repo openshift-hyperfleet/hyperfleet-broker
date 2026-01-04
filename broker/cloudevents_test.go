@@ -124,7 +124,7 @@ func TestEventToMessage(t *testing.T) {
 			expectError: false,
 			validate: func(t *testing.T, msg *message.Message) {
 				assert.Equal(t, "test-id-123", msg.UUID)
-				
+
 				// Payload should be a JSON representation of the event
 				var evt event.Event
 				err := json.Unmarshal(msg.Payload, &evt)
@@ -133,7 +133,7 @@ func TestEventToMessage(t *testing.T) {
 				assert.Equal(t, "com.example.test.event", evt.Type())
 				assert.Equal(t, "test-source", evt.Source())
 				assert.Equal(t, "test-id-123", evt.ID())
-				
+
 				// Verify data inside the unmarshaled event
 				var data map[string]string
 				err = json.Unmarshal(evt.Data(), &data)
@@ -153,7 +153,7 @@ func TestEventToMessage(t *testing.T) {
 			expectError: false,
 			validate: func(t *testing.T, msg *message.Message) {
 				assert.Equal(t, "test-id", msg.UUID)
-				
+
 				var evt event.Event
 				err := json.Unmarshal(msg.Payload, &evt)
 				require.NoError(t, err)

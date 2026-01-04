@@ -1,6 +1,7 @@
 package broker
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill/message"
 	"github.com/cloudevents/sdk-go/v2/event"
+	"github.com/openshift-hyperfleet/hyperfleet-broker/pkg/logger"
 )
 
 const (
@@ -17,45 +19,54 @@ const (
 	DefaultShutdownTimeout       = 30 * time.Second
 )
 
-// NewPublisher creates a new publisher based on the configuration.
-// If configMap is provided, it will be used instead of loading from file.
-// Providing a configMap is meant to be used for testing purposes only.
-// Config keys should use dot notation (e.g., "broker.type", "broker.rabbitmq.url").
-func NewPublisher(configMap ...map[string]string) (Publisher, error) {
+// NewPublisher creates a new publisher with a required logger and optional configuration.
+// Usage:
+//   - NewPublisher(logger) - uses provided logger and loads config from file
+//   - NewPublisher(logger, configMap) - uses provided logger with config map
+func NewPublisher(log logger.Logger, configMap ...map[string]string) (Publisher, error) {
+	if log == nil {
+		return nil, fmt.Errorf("logger is required")
+	}
+
 	var cfg *config
+	var err error
 
 	if len(configMap) > 0 && configMap[0] != nil {
-		var err error
 		cfg, err = buildConfigFromMap(configMap[0])
 		if err != nil {
 			return nil, fmt.Errorf("failed to build config from map: %w", err)
 		}
 	} else {
-		var err error
 		cfg, err = loadConfig()
 		if err != nil {
 			return nil, fmt.Errorf("failed to load config: %w", err)
 		}
 	}
 
-	logger := watermill.NewStdLogger(false, false)
+	// Create Watermill logger adapter with context.Background().
+	// Unlike Subscriber which creates a per-call adapter with the incoming context,
+	// Publisher uses a long-lived adapter because Watermill's publisher is created once
+	// and reused - it doesn't support per-call logger injection. The adapter is only
+	// used for Watermill's internal logging (connection setup, batching, etc.), not
+	// for application-level publish logging which uses the broker logger directly.
+	watermillLogger := logger.NewWatermillLoggerAdapter(log, context.Background())
 
-	// Log configuration before creating publisher if enabled
+	// Log configuration if enabled
 	if cfg.LogConfig {
-		logConfiguration(cfg, "Publisher", logger)
+		log.Info(context.Background(), "Creating publisher")
+		logConfiguration(cfg, "Publisher", watermillLogger)
 	}
 
 	var pub message.Publisher
-	var err error
 
 	switch cfg.Broker.Type {
 	case "rabbitmq":
-		pub, err = newRabbitMQPublisher(cfg, logger)
+		pub, err = newRabbitMQPublisher(cfg, watermillLogger)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create RabbitMQ publisher: %w", err)
 		}
 	case "googlepubsub":
-		pub, err = newGooglePubSubPublisher(cfg, logger)
+		pub, err = newGooglePubSubPublisher(cfg, watermillLogger)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create Google Pub/Sub publisher: %w", err)
 		}
@@ -63,52 +74,61 @@ func NewPublisher(configMap ...map[string]string) (Publisher, error) {
 		return nil, fmt.Errorf("unsupported broker type: %s", cfg.Broker.Type)
 	}
 
-	return &publisher{pub: pub}, nil
+	return &publisher{
+		pub:    pub,
+		logger: log,
+	}, nil
 }
 
-// NewSubscriber creates a new subscriber based on the configuration.
-// subscriptionID determines whether subscribers share messages (same ID = shared, different IDs = separate).
-// If configMap is provided, it will be used instead of loading from file.
-// Config keys should use dot notation (e.g., "broker.type", "broker.rabbitmq.url").
-func NewSubscriber(subscriptionID string, configMap ...map[string]string) (Subscriber, error) {
+// NewSubscriber creates a new subscriber with a required logger and optional configuration.
+// Usage:
+//   - NewSubscriber(logger, "id") - uses provided logger and loads config from file
+//   - NewSubscriber(logger, "id", configMap) - uses provided logger with config map
+func NewSubscriber(log logger.Logger, subscriptionID string, configMap ...map[string]string) (Subscriber, error) {
 	if subscriptionID == "" {
 		return nil, fmt.Errorf("subscriptionID is required")
 	}
+	if log == nil {
+		return nil, fmt.Errorf("logger is required")
+	}
 
 	var cfg *config
+	var err error
 
 	if len(configMap) > 0 && configMap[0] != nil {
-		var err error
 		cfg, err = buildConfigFromMap(configMap[0])
 		if err != nil {
 			return nil, fmt.Errorf("failed to build config from map: %w", err)
 		}
 	} else {
-		var err error
 		cfg, err = loadConfig()
 		if err != nil {
 			return nil, fmt.Errorf("failed to load config: %w", err)
 		}
 	}
 
-	logger := watermill.NewStdLogger(false, false)
+	// Create Watermill logger adapter with context.Background() for subscriber creation.
+	// This is used for Watermill's internal subscriber logging (connection, queue management).
+	// A separate per-call adapter is created in Subscribe() with the request context
+	// for message routing and handling.
+	watermillLogger := logger.NewWatermillLoggerAdapter(log, context.Background())
 
-	// Log configuration before creating subscriber if enabled
+	// Log configuration if enabled
 	if cfg.LogConfig {
-		logConfiguration(cfg, "Subscriber", logger)
+		log.Info(context.Background(), "Creating subscriber")
+		logConfiguration(cfg, "Subscriber", watermillLogger)
 	}
 
 	var sub message.Subscriber
-	var err error
 
 	switch cfg.Broker.Type {
 	case "rabbitmq":
-		sub, err = newRabbitMQSubscriber(cfg, logger, subscriptionID)
+		sub, err = newRabbitMQSubscriber(cfg, watermillLogger, subscriptionID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create RabbitMQ subscriber: %w", err)
 		}
 	case "googlepubsub":
-		sub, err = newGooglePubSubSubscriber(cfg, logger, subscriptionID)
+		sub, err = newGooglePubSubSubscriber(cfg, watermillLogger, subscriptionID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create Google Pub/Sub subscriber: %w", err)
 		}
@@ -124,7 +144,7 @@ func NewSubscriber(subscriptionID string, configMap ...map[string]string) (Subsc
 		sub:            sub,
 		parallelism:    parallelism,
 		subscriptionID: subscriptionID,
-		logger:         logger,
+		logger:         log,
 		errorChan:      make(chan *SubscriberError, ErrorChannelBufferSize),
 	}, nil
 }
