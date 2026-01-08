@@ -1,8 +1,10 @@
+include .bingo/Variables.mk
+
 .PHONY: test test-integration test-all lint fmt
 
 # Run linter
-lint:
-	golangci-lint run ./...
+lint: $(GOLANGCI_LINT)
+	$(GOLANGCI_LINT) run ./...
 
 # Format code
 fmt:
