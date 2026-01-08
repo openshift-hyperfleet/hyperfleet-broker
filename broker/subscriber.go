@@ -83,7 +83,7 @@ func (s *subscriber) Subscribe(ctx context.Context, topic string, handler Handle
 		msgCtx := msg.Context()
 
 		// Log message received - logger is guaranteed non-nil
-		s.logger.Infof(msgCtx, "Received message from topic %s", topic)
+		s.logger.Debugf(msgCtx, "Received message from topic %s", topic)
 
 		// Convert Watermill message to CloudEvent
 		evt, err := messageToEvent(msg)
@@ -101,7 +101,7 @@ func (s *subscriber) Subscribe(ctx context.Context, topic string, handler Handle
 		if err != nil {
 			s.logger.Errorf(msgCtx, "Handler failed to process event: %v", err)
 		} else {
-			s.logger.Infof(msgCtx, "Successfully processed event %s from topic %s subscription %s", evt.ID(), topic, s.subscriptionID)
+			s.logger.Debugf(msgCtx, "Successfully processed event %s from topic %s subscription %s", evt.ID(), topic, s.subscriptionID)
 		}
 
 		return err

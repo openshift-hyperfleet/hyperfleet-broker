@@ -57,11 +57,11 @@ func NewTestLogger(format ...OutputFormat) Logger {
 	switch selectedFormat {
 	case FormatJSON:
 		handler = slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-			Level: slog.LevelDebug,
+			Level: slog.LevelInfo,
 		})
 	default:
 		handler = slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-			Level: slog.LevelDebug,
+			Level: slog.LevelInfo,
 		})
 	}
 
