@@ -7,10 +7,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill/message"
 	"github.com/ThreeDotsLabs/watermill/message/router/middleware"
 	"github.com/cloudevents/sdk-go/v2/event"
+	"github.com/openshift-hyperfleet/hyperfleet-broker/pkg/logger"
 )
 
 // HandlerFunc is a function that handles a CloudEvent
@@ -40,7 +40,7 @@ type subscriber struct {
 	sub            message.Subscriber
 	parallelism    int
 	subscriptionID string
-	logger         watermill.LoggerAdapter
+	logger         logger.Logger // Broker logger (always present - default logger if not provided)
 	wg             sync.WaitGroup
 
 	// Error notification channel
@@ -59,9 +59,16 @@ func (s *subscriber) Subscribe(ctx context.Context, topic string, handler Handle
 		return fmt.Errorf("handler must be provided")
 	}
 
+	// Create a per-call Watermill logger adapter with the per-call context.
+	wmLogger := logger.NewWatermillLoggerAdapter(s.logger, ctx)
+
+	// Log subscription start - logger is guaranteed non-nil
+	s.logger.Infof(ctx, "Starting subscription to topic %s", topic)
+
 	// Create a new router for this subscription
-	router, err := message.NewRouter(message.RouterConfig{}, s.logger)
+	router, err := message.NewRouter(message.RouterConfig{}, wmLogger)
 	if err != nil {
+		s.logger.Errorf(ctx, "Failed to create router: %v", err)
 		return fmt.Errorf("failed to create router: %w", err)
 	}
 
@@ -72,9 +79,16 @@ func (s *subscriber) Subscribe(ctx context.Context, topic string, handler Handle
 
 	// Create the Watermill handler function
 	h := func(msg *message.Message) error {
+		// Use message context for tracing/metadata preservation
+		msgCtx := msg.Context()
+
+		// Log message received - logger is guaranteed non-nil
+		s.logger.Debugf(msgCtx, "Received message from topic %s", topic)
+
 		// Convert Watermill message to CloudEvent
 		evt, err := messageToEvent(msg)
 		if err != nil {
+			s.logger.Errorf(msgCtx, "Failed to convert message to CloudEvent: %v", err)
 			// If conversion fails, we return error which triggers Nack/Retry
 			// If it's a permanent error (malformed), Retry middleware will give up after MaxRetries
 			// and message will be Nacked (or sent to PoisonQueue if configured, but here just Nacked)
@@ -83,7 +97,14 @@ func (s *subscriber) Subscribe(ctx context.Context, topic string, handler Handle
 
 		// Process the event with the handler
 		// IMPORTANT: Pass msg.Context() to preserve tracing/metadata
-		return handler(msg.Context(), evt)
+		err = handler(msgCtx, evt)
+		if err != nil {
+			s.logger.Errorf(msgCtx, "Handler failed to process event: %v", err)
+		} else {
+			s.logger.Debugf(msgCtx, "Successfully processed event %s from topic %s subscription %s", evt.ID(), topic, s.subscriptionID)
+		}
+
+		return err
 	}
 
 	// Register handler multiple times to achieve parallelism
@@ -98,11 +119,17 @@ func (s *subscriber) Subscribe(ctx context.Context, topic string, handler Handle
 		)
 	}
 
+	// Log successful subscription setup
+	s.logger.Infof(ctx, "Successfully subscribed to topic %s subscription %s", topic, s.subscriptionID)
+
 	// Run the router in the background
 	s.wg.Go(func() {
 		if err := router.Run(ctx); err != nil {
 			// Determine if this is fatal (connection lost) or recoverable
 			fatal := !isContextCanceled(err)
+
+			// Log router error
+			s.logger.Errorf(ctx, "Router stopped with error: %v", err)
 
 			s.sendError(&SubscriberError{
 				Op:             "router",
@@ -111,11 +138,6 @@ func (s *subscriber) Subscribe(ctx context.Context, topic string, handler Handle
 				Err:            err,
 				Timestamp:      time.Now(),
 				Fatal:          fatal,
-			})
-
-			s.logger.Error("Router stopped with error", err, watermill.LogFields{
-				"topic":           topic,
-				"subscription_id": s.subscriptionID,
 			})
 		}
 	})
@@ -142,11 +164,9 @@ func (s *subscriber) sendError(err *SubscriberError) {
 		// Error sent successfully
 	default:
 		// Channel full - log and drop oldest error to make room
-		s.logger.Error("Error channel full, dropping error", err.Err, watermill.LogFields{
-			"topic":           err.Topic,
-			"subscription_id": s.subscriptionID,
-			"buffer_size":     ErrorChannelBufferSize,
-		})
+		s.logger.Errorf(context.Background(),
+			"Error channel full, dropping error: topic=%s, subscription_id=%s, buffer_size=%d, error=%v",
+			err.Topic, s.subscriptionID, ErrorChannelBufferSize, err.Err)
 
 		// Try to drain one old error and send new one
 		select {
@@ -163,9 +183,13 @@ func (s *subscriber) sendError(err *SubscriberError) {
 
 // Close closes the underlying subscriber
 func (s *subscriber) Close() error {
+	// Log close operation
+	s.logger.Info(context.Background(), "Closing subscriber")
+
 	// Closing the subscriber will stop all routers receiving messages
 	err := s.sub.Close()
 	if err != nil {
+		s.logger.Errorf(context.Background(), "Failed to close underlying subscriber: %v", err)
 		return err
 	}
 	s.wg.Wait()
@@ -176,6 +200,7 @@ func (s *subscriber) Close() error {
 	close(s.errorChan)
 	s.closeMu.Unlock()
 
+	s.logger.Info(context.Background(), "Successfully closed subscriber")
 	return nil
 }
 

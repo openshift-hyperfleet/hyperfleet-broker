@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/openshift-hyperfleet/hyperfleet-broker/broker"
+	"github.com/openshift-hyperfleet/hyperfleet-broker/pkg/logger"
 	"github.com/openshift-hyperfleet/hyperfleet-broker/test/integration/common"
 	pubsub "github.com/openshift-hyperfleet/hyperfleet-broker/test/integration/googlepubsub"
 	"github.com/openshift-hyperfleet/hyperfleet-broker/test/integration/rabbitmq"
@@ -52,7 +53,7 @@ func TestRabbitMQPerformance(t *testing.T) {
 	configMap := common.BuildConfigMap("rabbitmq", rabbitMQURL, "")
 
 	// Create publisher
-	pub, err := broker.NewPublisher(configMap)
+	pub, err := broker.NewPublisher(logger.NewTestLogger(), configMap)
 	require.NoError(t, err)
 	defer func() {
 		if err := pub.Close(); err != nil {
@@ -62,7 +63,7 @@ func TestRabbitMQPerformance(t *testing.T) {
 
 	// Create two subscribers with the same subscriptionID (shared subscription)
 	subscriptionID := "perf-subscription"
-	sub1, err := broker.NewSubscriber(subscriptionID, configMap)
+	sub1, err := broker.NewSubscriber(logger.NewTestLogger(), subscriptionID, configMap)
 	require.NoError(t, err)
 	defer func() {
 		if err := sub1.Close(); err != nil {
@@ -70,7 +71,7 @@ func TestRabbitMQPerformance(t *testing.T) {
 		}
 	}()
 
-	sub2, err := broker.NewSubscriber(subscriptionID, configMap)
+	sub2, err := broker.NewSubscriber(logger.NewTestLogger(), subscriptionID, configMap)
 	require.NoError(t, err)
 	defer func() {
 		if err := sub2.Close(); err != nil {
@@ -130,7 +131,7 @@ func TestRabbitMQPerformance(t *testing.T) {
 				continue
 			}
 
-			if err := pub.Publish("perf-topic", &evt); err != nil {
+			if err := pub.Publish(context.Background(), "perf-topic", &evt); err != nil {
 				t.Logf("Error publishing message: %v", err)
 				continue
 			}
@@ -199,7 +200,7 @@ func TestGooglePubSubPerformance(t *testing.T) {
 	configMap["subscriber.parallelism"] = "10"
 	configMap["broker.googlepubsub.num_goroutines"] = "10"
 	// Create publisher
-	pub, err := broker.NewPublisher(configMap)
+	pub, err := broker.NewPublisher(logger.NewTestLogger(), configMap)
 	require.NoError(t, err)
 	defer func() {
 		if err := pub.Close(); err != nil {
@@ -209,7 +210,7 @@ func TestGooglePubSubPerformance(t *testing.T) {
 
 	// Create two subscribers with the same subscriptionID (shared subscription)
 	subscriptionID := "perf-subscription"
-	sub1, err := broker.NewSubscriber(subscriptionID, configMap)
+	sub1, err := broker.NewSubscriber(logger.NewTestLogger(), subscriptionID, configMap)
 	require.NoError(t, err)
 	defer func() {
 		if err := sub1.Close(); err != nil {
@@ -217,7 +218,7 @@ func TestGooglePubSubPerformance(t *testing.T) {
 		}
 	}()
 
-	sub2, err := broker.NewSubscriber(subscriptionID, configMap)
+	sub2, err := broker.NewSubscriber(logger.NewTestLogger(), subscriptionID, configMap)
 	require.NoError(t, err)
 	defer func() {
 		if err := sub2.Close(); err != nil {
@@ -280,7 +281,7 @@ func TestGooglePubSubPerformance(t *testing.T) {
 				continue
 			}
 
-			if err := pub.Publish("perf-topic", &evt); err != nil {
+			if err := pub.Publish(context.Background(), "perf-topic", &evt); err != nil {
 				t.Logf("Error publishing message: %v", err)
 				continue
 			}

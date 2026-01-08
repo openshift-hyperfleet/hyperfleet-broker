@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -9,6 +10,7 @@ import (
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/cloudevents/sdk-go/v2/event"
 	"github.com/openshift-hyperfleet/hyperfleet-broker/broker"
+	"github.com/openshift-hyperfleet/hyperfleet-broker/pkg/logger"
 )
 
 func createEvent(id string, message string) event.Event {
@@ -25,13 +27,16 @@ func createEvent(id string, message string) event.Event {
 }
 
 func main() {
+	ctx := context.Background()
+
 	interval := flag.Duration("interval", 20*time.Millisecond, "Interval between publishing events")
 	topic := flag.String("topic", "example-topic", "Topic to publish events to")
 	message := flag.String("message", "", "Send a single message with this content and exit")
 	flag.Parse()
 
-	// Create publisher
-	publisher, err := broker.NewPublisher()
+	// Create logger and publisher
+	appLogger := logger.NewTestLogger()
+	publisher, err := broker.NewPublisher(appLogger)
 	if err != nil {
 		log.Fatalf("Failed to create publisher: %v", err)
 	}
@@ -40,7 +45,7 @@ func main() {
 	// Single message mode
 	if *message != "" {
 		evt := createEvent(fmt.Sprintf("event-%d", time.Now().UnixNano()), *message)
-		if err := publisher.Publish(*topic, &evt); err != nil {
+		if err := publisher.Publish(ctx, *topic, &evt); err != nil {
 			log.Fatalf("Error publishing event: %v", err)
 		}
 		log.Printf("Published single message to topic %s: %s", *topic, *message)
@@ -59,7 +64,7 @@ func main() {
 	for range ticker.C {
 		counter++
 		evt := createEvent(fmt.Sprintf("event-%d", counter), "Hello from publisher")
-		if err := publisher.Publish(*topic, &evt); err != nil {
+		if err := publisher.Publish(ctx, *topic, &evt); err != nil {
 			log.Printf("Error publishing event: %v", err)
 		} else {
 			log.Printf("Published event #%d (ID: %s)", counter, evt.ID())

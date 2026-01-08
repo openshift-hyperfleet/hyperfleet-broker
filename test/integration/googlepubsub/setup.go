@@ -61,5 +61,3 @@ func SetupPubSubEmulator(t *testing.T) (string, string) {
 
 	return projectID, emulatorHost
 }
-
-

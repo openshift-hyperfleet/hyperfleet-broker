@@ -11,6 +11,7 @@ import (
 
 	"github.com/cloudevents/sdk-go/v2/event"
 	"github.com/openshift-hyperfleet/hyperfleet-broker/broker"
+	"github.com/openshift-hyperfleet/hyperfleet-broker/pkg/logger"
 )
 
 func main() {
@@ -25,9 +26,10 @@ func main() {
 		instanceID = "1"
 	}
 
-	// Create subscriber with subscription ID
+	// Create logger and subscriber with subscription ID
 	// Both subscribers use the same subscription ID to share messages (load balancing)
-	subscriber, err := broker.NewSubscriber(*subscription)
+	appLogger := logger.NewTestLogger()
+	subscriber, err := broker.NewSubscriber(appLogger, *subscription)
 	if err != nil {
 		log.Fatalf("Failed to create subscriber: %v", err)
 	}

@@ -3,6 +3,7 @@ package broker
 import (
 	"testing"
 
+	"github.com/openshift-hyperfleet/hyperfleet-broker/pkg/logger"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -63,10 +64,11 @@ func TestNewPublisherErrorHandling(t *testing.T) {
 			var pub Publisher
 			var err error
 
+			mockLogger := logger.NewMockLogger()
 			if tt.configMap == nil {
-				pub, err = NewPublisher()
+				pub, err = NewPublisher(mockLogger)
 			} else {
-				pub, err = NewPublisher(tt.configMap)
+				pub, err = NewPublisher(mockLogger, tt.configMap)
 			}
 
 			if tt.expectError {
@@ -136,15 +138,8 @@ func TestNewSubscriberErrorHandling(t *testing.T) {
 			},
 			expectError: false,
 		},
-		{
-			name:           "valid googlepubsub config",
-			subscriptionID: "test-sub",
-			configMap: map[string]string{
-				"broker.type":                    "googlepubsub",
-				"broker.googlepubsub.project_id": "test-project",
-			},
-			expectError: false,
-		},
+		// Note: googlepubsub success case is not tested here because it requires
+		// GCP credentials. It's covered by integration tests instead.
 		{
 			name:           "nil config map",
 			subscriptionID: "test-sub",
@@ -158,10 +153,11 @@ func TestNewSubscriberErrorHandling(t *testing.T) {
 			var sub Subscriber
 			var err error
 
+			mockLogger := logger.NewMockLogger()
 			if tt.configMap == nil {
-				sub, err = NewSubscriber(tt.subscriptionID)
+				sub, err = NewSubscriber(mockLogger, tt.subscriptionID)
 			} else {
-				sub, err = NewSubscriber(tt.subscriptionID, tt.configMap)
+				sub, err = NewSubscriber(mockLogger, tt.subscriptionID, tt.configMap)
 			}
 
 			if tt.expectError {
@@ -195,7 +191,8 @@ func TestPublisherPublishErrorHandling(t *testing.T) {
 		// Invalid URL - will fail when trying to connect
 	}
 
-	_, err := NewPublisher(configMap)
+	mockLogger := logger.NewMockLogger()
+	_, err := NewPublisher(mockLogger, configMap)
 	assert.Error(t, err)
 }
 
