@@ -184,13 +184,14 @@ func newGooglePubSubSubscriber(cfg *config, logger watermill.LoggerAdapter, subs
 		}
 	}
 
-	// Configure subscription name generator to use subscription ID
-	// The topic passed to Subscribe will be the original topic (no colon)
-	// We append subscription ID to create unique subscription names
+	// Configure subscription name generator to include both topic and subscription ID.
+	// In Google PubSub, a subscription is bound to exactly one topic, so the name
+	// must be unique per topic to avoid conflicts when the same subscriptionID is used
+	// across different topics.
 	pubsubConfig := googlepubsub.SubscriberConfig{
 		ProjectID: gps.ProjectID,
 		GenerateSubscriptionName: func(topic string) string {
-			return subscriptionID
+			return topic + "-" + subscriptionID
 		},
 		DoNotCreateTopicIfMissing:        !gps.CreateTopicIfMissing,        // Invert: our positive flag -> watermill's negative flag
 		DoNotCreateSubscriptionIfMissing: !gps.CreateSubscriptionIfMissing, // Invert: our positive flag -> watermill's negative flag

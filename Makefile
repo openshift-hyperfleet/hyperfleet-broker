@@ -16,7 +16,7 @@ test:
 
 # Run tests in the test folder
 test-integration:
-	go test -v ./test/integration/... -timeout 10m
+	go test -v -p 1 ./test/integration/... -timeout 10m
 
 # Run all tests
 test-all: test test-integration

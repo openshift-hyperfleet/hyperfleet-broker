@@ -2,6 +2,8 @@ package rabbitmq_test
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
 	"os"
 	"testing"
 	"time"
@@ -17,20 +19,52 @@ import (
 	"github.com/openshift-hyperfleet/hyperfleet-broker/test/integration/common"
 )
 
-// Re-export setup function for backward compatibility with test files
-// The actual implementation is in setup.go
+// sharedRabbitMQURL holds the connection URL for the shared RabbitMQ container
+// created once in TestMain and reused across all tests in this package.
+var sharedRabbitMQURL string
 
-// TestMain sets up the test environment for Podman and disables Ryuk
+// TestMain sets up the test environment for Podman and disables Ryuk,
+// creates a shared RabbitMQ container, runs all tests, then terminates the container.
 func TestMain(m *testing.M) {
 	common.SetupTestEnvironment()
 
-	// Run tests
+	ctx := context.Background()
+
+	rabbitmqContainer, err := rabbitmq.Run(ctx,
+		"rabbitmq:3-management-alpine",
+		rabbitmq.WithAdminUsername("guest"),
+		rabbitmq.WithAdminPassword("guest"),
+		testcontainers.WithWaitStrategy(
+			wait.ForLog("Server startup complete").
+				WithOccurrence(1).
+				WithStartupTimeout(60*time.Second),
+		),
+	)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to start rabbitmq container: %v\n", err)
+		os.Exit(1)
+	}
+
+	connectionString, err := rabbitmqContainer.AmqpURL(ctx)
+	if err != nil {
+		_ = rabbitmqContainer.Terminate(ctx)
+		fmt.Fprintf(os.Stderr, "failed to get rabbitmq AMQP URL: %v\n", err)
+		os.Exit(1)
+	}
+
+	sharedRabbitMQURL = connectionString
+
 	code := m.Run()
+
+	if err := rabbitmqContainer.Terminate(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to terminate rabbitmq container: %v\n", err)
+	}
+
 	os.Exit(code)
 }
 
-// SetupRabbitMQContainer starts a RabbitMQ testcontainer and returns the connection URL
-// This is exported so it can be used by other test packages (e.g., performance tests)
+// SetupRabbitMQContainer starts a RabbitMQ testcontainer and returns the connection URL.
+// This is exported so it can be used by other test packages (e.g., integration_test).
 func SetupRabbitMQContainer(t *testing.T) string {
 	ctx := context.Background()
 
@@ -59,8 +93,7 @@ func SetupRabbitMQContainer(t *testing.T) string {
 
 // TestPublisherSubscriber tests the full publish/subscribe flow with RabbitMQ
 func TestPublisherSubscriber(t *testing.T) {
-	rabbitMQURL := SetupRabbitMQContainer(t)
-	configMap := common.BuildConfigMap("rabbitmq", rabbitMQURL, "")
+	configMap := common.BuildConfigMap("rabbitmq", sharedRabbitMQURL, "")
 
 	common.RunPublisherSubscriber(t, configMap, common.BrokerTestConfig{
 		BrokerType:     "rabbitmq",
@@ -71,8 +104,7 @@ func TestPublisherSubscriber(t *testing.T) {
 
 // TestMultipleEvents tests that multiple events are processed correctly
 func TestMultipleEvents(t *testing.T) {
-	rabbitMQURL := SetupRabbitMQContainer(t)
-	configMap := common.BuildConfigMap("rabbitmq", rabbitMQURL, "")
+	configMap := common.BuildConfigMap("rabbitmq", sharedRabbitMQURL, "")
 
 	common.RunMultipleEvents(t, configMap, common.BrokerTestConfig{
 		BrokerType:     "rabbitmq",
@@ -83,8 +115,7 @@ func TestMultipleEvents(t *testing.T) {
 
 // TestSharedSubscription tests that two subscribers with the same subscriptionID share messages
 func TestSharedSubscription(t *testing.T) {
-	rabbitMQURL := SetupRabbitMQContainer(t)
-	configMap := common.BuildConfigMap("rabbitmq", rabbitMQURL, "")
+	configMap := common.BuildConfigMap("rabbitmq", sharedRabbitMQURL, "")
 
 	common.RunSharedSubscription(t, configMap, common.BrokerTestConfig{
 		BrokerType:     "rabbitmq",
@@ -95,8 +126,7 @@ func TestSharedSubscription(t *testing.T) {
 
 // TestFanoutSubscription tests that two subscribers with different subscriptionIDs each get all messages
 func TestFanoutSubscription(t *testing.T) {
-	rabbitMQURL := SetupRabbitMQContainer(t)
-	configMap := common.BuildConfigMap("rabbitmq", rabbitMQURL, "")
+	configMap := common.BuildConfigMap("rabbitmq", sharedRabbitMQURL, "")
 
 	common.RunFanoutSubscription(t, configMap, common.BrokerTestConfig{
 		BrokerType:     "rabbitmq",
@@ -107,11 +137,11 @@ func TestFanoutSubscription(t *testing.T) {
 
 // TestSubscriptionID tests that subscription IDs work correctly
 func TestSubscriptionID(t *testing.T) {
+	topic := fmt.Sprintf("fanout-topic-%d", time.Now().UnixNano())
 	ctx := context.Background()
-	rabbitMQURL := SetupRabbitMQContainer(t)
-	configMap := common.BuildConfigMap("rabbitmq", rabbitMQURL, "")
+	configMap := common.BuildConfigMap("rabbitmq", sharedRabbitMQURL, "")
 
-	pub, err := broker.NewPublisher(logger.NewTestLogger(), configMap)
+	pub, err := broker.NewPublisher(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), configMap)
 	require.NoError(t, err)
 	defer func() {
 		if err := pub.Close(); err != nil {
@@ -120,7 +150,7 @@ func TestSubscriptionID(t *testing.T) {
 	}()
 
 	// Create two subscribers with different subscription IDs
-	sub1, err := broker.NewSubscriber(logger.NewTestLogger(), "subscription-1", configMap)
+	sub1, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), "subscription-1", configMap)
 	require.NoError(t, err)
 	defer func() {
 		if err := sub1.Close(); err != nil {
@@ -128,7 +158,7 @@ func TestSubscriptionID(t *testing.T) {
 		}
 	}()
 
-	sub2, err := broker.NewSubscriber(logger.NewTestLogger(), "subscription-2", configMap)
+	sub2, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), "subscription-2", configMap)
 	require.NoError(t, err)
 	defer func() {
 		if err := sub2.Close(); err != nil {
@@ -158,15 +188,15 @@ func TestSubscriptionID(t *testing.T) {
 		return nil
 	}
 
-	err = sub1.Subscribe(ctx, "fanout-topic", handler1)
+	err = sub1.Subscribe(ctx, topic, handler1)
 	require.NoError(t, err)
 
-	err = sub2.Subscribe(ctx, "fanout-topic", handler2)
+	err = sub2.Subscribe(ctx, topic, handler2)
 	require.NoError(t, err)
 
 	time.Sleep(500 * time.Millisecond)
 
-	err = pub.Publish(ctx, "fanout-topic", &evt)
+	err = pub.Publish(ctx, topic, &evt)
 	require.NoError(t, err)
 
 	// Both should receive the event
@@ -187,14 +217,13 @@ func TestSubscriptionID(t *testing.T) {
 
 // TestSlowSubscriber tests that a slow subscriber processes fewer messages than a fast one
 func TestSlowSubscriber(t *testing.T) {
-	rabbitMQURL := SetupRabbitMQContainer(t)
-	configMap := common.BuildConfigMap("rabbitmq", rabbitMQURL, "")
+	configMap := common.BuildConfigMap("rabbitmq", sharedRabbitMQURL, "")
 
-	subscriptionID := "slow-subscription"
-	sub1, err := broker.NewSubscriber(logger.NewTestLogger(), subscriptionID, configMap)
+	subscriptionID := fmt.Sprintf("slow-subscription-%d", time.Now().UnixNano())
+	sub1, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), subscriptionID, configMap)
 	require.NoError(t, err)
 
-	sub2, err := broker.NewSubscriber(logger.NewTestLogger(), subscriptionID, configMap)
+	sub2, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), subscriptionID, configMap)
 	require.NoError(t, err)
 
 	common.RunSlowSubscriber(t, configMap, common.BrokerTestConfig{
@@ -206,8 +235,7 @@ func TestSlowSubscriber(t *testing.T) {
 
 // TestErrorSubscriber tests that messages are redistributed when one subscriber fails
 func TestErrorSubscriber(t *testing.T) {
-	rabbitMQURL := SetupRabbitMQContainer(t)
-	configMap := common.BuildConfigMap("rabbitmq", rabbitMQURL, "")
+	configMap := common.BuildConfigMap("rabbitmq", sharedRabbitMQURL, "")
 
 	common.RunErrorSubscriber(t, configMap, common.BrokerTestConfig{
 		BrokerType:     "rabbitmq",
@@ -218,8 +246,7 @@ func TestErrorSubscriber(t *testing.T) {
 
 // TestCloseWaitsForInFlightMessages tests that Close() waits for in-flight message processing
 func TestCloseWaitsForInFlightMessages(t *testing.T) {
-	rabbitMQURL := SetupRabbitMQContainer(t)
-	configMap := common.BuildConfigMap("rabbitmq", rabbitMQURL, "")
+	configMap := common.BuildConfigMap("rabbitmq", sharedRabbitMQURL, "")
 
 	common.RunCloseWaitsForInFlightMessages(t, configMap, common.BrokerTestConfig{
 		BrokerType:     "rabbitmq",
@@ -230,8 +257,7 @@ func TestCloseWaitsForInFlightMessages(t *testing.T) {
 
 // TestPanicHandler tests that a handler that panics doesn't cause Close() to hang
 func TestPanicHandler(t *testing.T) {
-	rabbitMQURL := SetupRabbitMQContainer(t)
-	configMap := common.BuildConfigMap("rabbitmq", rabbitMQURL, "")
+	configMap := common.BuildConfigMap("rabbitmq", sharedRabbitMQURL, "")
 
 	common.RunPanicHandler(t, configMap, common.BrokerTestConfig{
 		BrokerType:     "rabbitmq",

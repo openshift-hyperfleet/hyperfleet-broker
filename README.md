@@ -53,7 +53,7 @@ appLogger := logger.NewTestLogger()
 publisher, err := broker.NewPublisher(appLogger)
 
 // Use JSON format for the default logger
-appLogger := logger.NewTestLogger(logger.FormatJSON)
+appLogger := logger.NewTestLogger(logger.WithFormat(logger.FormatJSON))
 publisher, err := broker.NewPublisher(appLogger)
 
 // Use your own logger implementation with config
