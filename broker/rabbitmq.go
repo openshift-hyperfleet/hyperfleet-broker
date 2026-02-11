@@ -22,6 +22,28 @@ type rabbitMQConfig struct {
 	PublisherConfirm bool   `mapstructure:"publisher_confirm"`
 }
 
+// newRabbitMQHealthCheck creates a health check function for a RabbitMQ publisher.
+// It uses the AMQP ConnectionWrapper's IsConnected() and Closed() methods
+// to determine if the broker connection is alive.
+func newRabbitMQHealthCheck(pub message.Publisher) healthCheckFunc {
+	return func() error {
+		amqpPub, ok := pub.(*amqp.Publisher)
+		if !ok {
+			return fmt.Errorf("unexpected publisher type for RabbitMQ health check")
+		}
+		if amqpPub == nil {
+			return fmt.Errorf("RabbitMQ publisher is nil")
+		}
+		if amqpPub.Closed() {
+			return fmt.Errorf("RabbitMQ connection is closed")
+		}
+		if !amqpPub.IsConnected() {
+			return fmt.Errorf("RabbitMQ connection is not established")
+		}
+		return nil
+	}
+}
+
 // newRabbitMQPublisher creates a RabbitMQ publisher
 func newRabbitMQPublisher(cfg *config, logger watermill.LoggerAdapter) (message.Publisher, error) {
 	amqpConfig := amqp.NewDurablePubSubConfig(

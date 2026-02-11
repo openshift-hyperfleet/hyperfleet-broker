@@ -12,6 +12,7 @@ import (
 	"github.com/ThreeDotsLabs/watermill"
 	googlepubsub "github.com/ThreeDotsLabs/watermill-googlecloud/v2/pkg/googlecloud"
 	"github.com/ThreeDotsLabs/watermill/message"
+	"google.golang.org/api/iterator"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -75,6 +76,29 @@ func parseGoogleCloudDuration(s string) (time.Duration, error) {
 	}
 
 	return 0, fmt.Errorf("invalid duration format: %s", s)
+}
+
+// newGooglePubSubHealthCheck creates a health check function for a Google Pub/Sub publisher.
+// It reuses the provided pubsub.Client to perform a lightweight ListTopics API call
+// with page size 1 and a 3-second timeout to verify connectivity.
+// The caller is responsible for closing the client (via publisher.healthCloser).
+func newGooglePubSubHealthCheck(client *pubsub.Client, projectID string) healthCheckFunc {
+	return func() error {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+
+		it := client.TopicAdminClient.ListTopics(ctx, &pubsubpb.ListTopicsRequest{
+			Project:  fmt.Sprintf("projects/%s", projectID),
+			PageSize: 1,
+		})
+		// Call Next() to trigger the actual API call.
+		// iterator.Done means no topics exist but connection is healthy.
+		_, err := it.Next()
+		if err != nil && err != iterator.Done {
+			return fmt.Errorf("google pub/sub health check failed: %w", err)
+		}
+		return nil
+	}
 }
 
 // newGooglePubSubPublisher creates a Google Pub/Sub publisher

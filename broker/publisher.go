@@ -2,6 +2,8 @@ package broker
 
 import (
 	"context"
+	"fmt"
+	"io"
 
 	"github.com/ThreeDotsLabs/watermill/message"
 	"github.com/cloudevents/sdk-go/v2/event"
@@ -12,14 +14,23 @@ import (
 type Publisher interface {
 	// Publish publishes a CloudEvent to the specified topic with context
 	Publish(ctx context.Context, topic string, event *event.Event) error
+	// Health checks if the underlying broker connection is healthy.
+	// Returns nil if healthy, or an error describing the failure.
+	Health() error
 	// Close closes the underlying publisher
 	Close() error
 }
 
+// healthCheckFunc is a function that checks broker connectivity.
+// Returns nil if healthy, or an error describing the failure.
+type healthCheckFunc func() error
+
 // publisher wraps a Watermill publisher and provides a simplified interface
 type publisher struct {
-	pub    message.Publisher
-	logger logger.Logger // Caller's logger (always present - default logger if not provided)
+	pub          message.Publisher
+	logger       logger.Logger // Caller's logger (always present - default logger if not provided)
+	healthCheck  healthCheckFunc
+	healthCloser io.Closer // optional resource to close with publisher (e.g. Pub/Sub health check client)
 }
 
 // Publish publishes a CloudEvent to the specified topic with context
@@ -45,13 +56,31 @@ func (p *publisher) Publish(ctx context.Context, topic string, event *event.Even
 	return nil
 }
 
-// Close closes the underlying publisher
+// Health checks if the underlying broker connection is healthy.
+// Returns nil if healthy, or an error describing the failure.
+func (p *publisher) Health() error {
+	if p == nil || p.healthCheck == nil {
+		return fmt.Errorf("health check not configured")
+	}
+	return p.healthCheck()
+}
+
+// Close closes the underlying publisher and any health check resources.
 func (p *publisher) Close() error {
 	p.logger.Info(context.Background(), "Closing publisher")
 
 	err := p.pub.Close()
 	if err != nil {
 		p.logger.Errorf(context.Background(), "Failed to close publisher: %v", err)
+	}
+
+	if p.healthCloser != nil {
+		if closeErr := p.healthCloser.Close(); closeErr != nil {
+			p.logger.Errorf(context.Background(), "Failed to close health check client: %v", closeErr)
+			if err == nil {
+				err = closeErr
+			}
+		}
 	}
 
 	return err

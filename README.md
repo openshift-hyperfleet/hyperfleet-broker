@@ -13,6 +13,7 @@ The current implementation uses [Watermill](https://github.com/ThreeDotsLabs/wat
 - **Flexible Configuration**: YAML configuration files with environment variable overrides via Viper
 - **Worker Pools**: Configurable parallel message processing for subscribers
 - **Subscription Management**: Flexible subscription IDs for load balancing (shared subscriptions) or fanout (separate subscriptions)
+- **Health Checks**: Built-in `Health()` method on `Publisher` for readiness probes (per [HyperFleet Health Endpoints standard](https://github.com/openshift-hyperfleet/architecture/blob/main/hyperfleet/standards/health-endpoints.md))
 - **Simple API**: Clean, easy-to-use interface that hides Watermill complexity
 
 ## Installation
@@ -113,9 +114,25 @@ func main() {
 
 </details>
 
-Note for Google PubSub: The Google Pub/Sub publisher implementation (via Watermill/Google Cloud SDK) starts background goroutines (for batching, connection management, etc.). 
-The app should call Close() to not leak 
+Note for Google Pub/Sub: The Google Pub/Sub publisher implementation (via Watermill/Google Cloud SDK) starts background goroutines (for batching, connection management, etc.).
+The app should call `Close()` to avoid leaking these background goroutines and resources.
 
+### Health Check
+
+The `Publisher` interface exposes a `Health() error` method that consumers can use to verify broker connectivity, typically in `/readyz` endpoints:
+
+```go
+if err := publisher.Health(); err != nil {
+    // Broker is unhealthy — return 503
+    log.Printf("Broker health check failed: %v", err)
+}
+```
+
+The health check implementation varies by broker:
+- **RabbitMQ**: Checks if the AMQP connection is open and not closed (in-memory, no network call)
+- **Google Pub/Sub**: Performs a lightweight `ListTopics` API call (page size 1, 3s timeout) using a persistent client created once with the publisher
+
+> **Note:** The Google Pub/Sub `Health()` implementation requires the `pubsub.topics.list` IAM permission on the project. This is separate from publish permissions (`pubsub.topics.publish`), so a principal that can publish but lacks `pubsub.topics.list` will cause `Publisher.Health()` to return an error and may misconfigure readiness probes.
 
 <details>
 <summary><strong>Subscriber Example</strong></summary>
