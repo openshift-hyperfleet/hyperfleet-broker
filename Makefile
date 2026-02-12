@@ -14,7 +14,7 @@ fmt:
 test:
 	go test -v ./broker/... ./pkg/... -timeout 10m
 
-# Run tests in the test folder
+# Run tests in the test folder (sequential packages: CI has 1 CPU so parallel execution causes timeouts)
 test-integration:
 	go test -v -p 1 ./test/integration/... -timeout 10m
 

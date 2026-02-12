@@ -12,7 +12,6 @@ import (
 	"github.com/ThreeDotsLabs/watermill"
 	googlepubsub "github.com/ThreeDotsLabs/watermill-googlecloud/v2/pkg/googlecloud"
 	"github.com/ThreeDotsLabs/watermill/message"
-	"google.golang.org/api/iterator"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -78,23 +77,30 @@ func parseGoogleCloudDuration(s string) (time.Duration, error) {
 	return 0, fmt.Errorf("invalid duration format: %s", s)
 }
 
+// healthCheckTopicName is a non-existent topic used as a connectivity probe.
+// GetTopic returning NotFound proves the round-trip to Pub/Sub succeeded.
+const healthCheckTopicName = "hyperfleet-health-probe"
+
 // newGooglePubSubHealthCheck creates a health check function for a Google Pub/Sub publisher.
-// It reuses the provided pubsub.Client to perform a lightweight ListTopics API call
-// with page size 1 and a 3-second timeout to verify connectivity.
+// It reuses the provided pubsub.Client to perform a lightweight GetTopic API call
+// with a 3-second timeout to verify connectivity.
+// Requires pubsub.topics.get (not included in roles/pubsub.publisher; grant roles/pubsub.viewer or a custom role).
 // The caller is responsible for closing the client (via publisher.healthCloser).
 func newGooglePubSubHealthCheck(client *pubsub.Client, projectID string) healthCheckFunc {
-	return func() error {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	fullTopicName := fmt.Sprintf("projects/%s/topics/%s", projectID, healthCheckTopicName)
+
+	return func(ctx context.Context) error {
+		ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 		defer cancel()
 
-		it := client.TopicAdminClient.ListTopics(ctx, &pubsubpb.ListTopicsRequest{
-			Project:  fmt.Sprintf("projects/%s", projectID),
-			PageSize: 1,
+		_, err := client.TopicAdminClient.GetTopic(ctx, &pubsubpb.GetTopicRequest{
+			Topic: fullTopicName,
 		})
-		// Call Next() to trigger the actual API call.
-		// iterator.Done means no topics exist but connection is healthy.
-		_, err := it.Next()
-		if err != nil && err != iterator.Done {
+		if err != nil {
+			// NotFound means the API is reachable — the topic just doesn't exist.
+			if st, ok := status.FromError(err); ok && st.Code() == codes.NotFound {
+				return nil
+			}
 			return fmt.Errorf("google pub/sub health check failed: %w", err)
 		}
 		return nil
@@ -184,14 +190,11 @@ func newGooglePubSubSubscriber(cfg *config, logger watermill.LoggerAdapter, subs
 		}
 	}
 
-	// Configure subscription name generator to include both topic and subscription ID.
-	// In Google PubSub, a subscription is bound to exactly one topic, so the name
-	// must be unique per topic to avoid conflicts when the same subscriptionID is used
-	// across different topics.
+	// Configure subscription name generator to use subscription ID
 	pubsubConfig := googlepubsub.SubscriberConfig{
 		ProjectID: gps.ProjectID,
 		GenerateSubscriptionName: func(topic string) string {
-			return topic + "-" + subscriptionID
+			return subscriptionID
 		},
 		DoNotCreateTopicIfMissing:        !gps.CreateTopicIfMissing,        // Invert: our positive flag -> watermill's negative flag
 		DoNotCreateSubscriptionIfMissing: !gps.CreateSubscriptionIfMissing, // Invert: our positive flag -> watermill's negative flag

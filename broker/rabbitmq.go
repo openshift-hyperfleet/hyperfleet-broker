@@ -1,6 +1,7 @@
 package broker
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -26,7 +27,7 @@ type rabbitMQConfig struct {
 // It uses the AMQP ConnectionWrapper's IsConnected() and Closed() methods
 // to determine if the broker connection is alive.
 func newRabbitMQHealthCheck(pub message.Publisher) healthCheckFunc {
-	return func() error {
+	return func(_ context.Context) error {
 		amqpPub, ok := pub.(*amqp.Publisher)
 		if !ok {
 			return fmt.Errorf("unexpected publisher type for RabbitMQ health check")

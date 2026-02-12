@@ -1,6 +1,7 @@
 package broker
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -15,22 +16,22 @@ func TestPublisherHealthWithCustomHealthCheck(t *testing.T) {
 	t.Run("healthy publisher returns nil", func(t *testing.T) {
 		p := &publisher{
 			logger: mockLogger,
-			healthCheck: func() error {
+			healthCheck: func(_ context.Context) error {
 				return nil
 			},
 		}
-		err := p.Health()
+		err := p.Health(context.Background())
 		assert.NoError(t, err)
 	})
 
 	t.Run("unhealthy publisher returns error", func(t *testing.T) {
 		p := &publisher{
 			logger: mockLogger,
-			healthCheck: func() error {
+			healthCheck: func(_ context.Context) error {
 				return fmt.Errorf("connection lost")
 			},
 		}
-		err := p.Health()
+		err := p.Health(context.Background())
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "connection lost")
 	})
@@ -38,10 +39,10 @@ func TestPublisherHealthWithCustomHealthCheck(t *testing.T) {
 
 func TestNewRabbitMQHealthCheck(t *testing.T) {
 	t.Run("returns error for non-AMQP publisher", func(t *testing.T) {
-		// Pass a nil publisher wrapped in the message.Publisher interface
-		// to trigger the type assertion failure
+		// Pass a fakeWatermillPublisher (non-AMQP) to newRabbitMQHealthCheck
+		// to trigger the AMQP type assertion failure
 		hc := newRabbitMQHealthCheck(&fakeWatermillPublisher{})
-		err := hc()
+		err := hc(context.Background())
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "unexpected publisher type")
 	})

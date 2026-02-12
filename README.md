@@ -119,10 +119,10 @@ The app should call `Close()` to avoid leaking these background goroutines and r
 
 ### Health Check
 
-The `Publisher` interface exposes a `Health() error` method that consumers can use to verify broker connectivity, typically in `/readyz` endpoints:
+The `Publisher` interface exposes a `Health(ctx context.Context) error` method that consumers can use to verify broker connectivity, typically in `/readyz` endpoints:
 
 ```go
-if err := publisher.Health(); err != nil {
+if err := publisher.Health(ctx); err != nil {
     // Broker is unhealthy — return 503
     log.Printf("Broker health check failed: %v", err)
 }
@@ -130,9 +130,7 @@ if err := publisher.Health(); err != nil {
 
 The health check implementation varies by broker:
 - **RabbitMQ**: Checks if the AMQP connection is open and not closed (in-memory, no network call)
-- **Google Pub/Sub**: Performs a lightweight `ListTopics` API call (page size 1, 3s timeout) using a persistent client created once with the publisher
-
-> **Note:** The Google Pub/Sub `Health()` implementation requires the `pubsub.topics.list` IAM permission on the project. This is separate from publish permissions (`pubsub.topics.publish`), so a principal that can publish but lacks `pubsub.topics.list` will cause `Publisher.Health()` to return an error and may misconfigure readiness probes.
+- **Google Pub/Sub**: Performs a lightweight `GetTopic` API call (3s timeout) on a non-existent probe topic to verify connectivity. A `NotFound` response confirms the round-trip succeeded. Requires the `pubsub.topics.get` permission, which is **not** included in `roles/pubsub.publisher`. You must grant an additional role such as `roles/pubsub.viewer`, `roles/pubsub.editor`, or a custom role containing `pubsub.topics.get`.
 
 <details>
 <summary><strong>Subscriber Example</strong></summary>
@@ -473,9 +471,9 @@ The subscription ID concept enables two messaging patterns:
 - **Load Balancing**: Multiple subscribers with the same subscription ID share messages
 - **Fanout**: Subscribers with different subscription IDs each receive all messages
 
-This is implemented consistently across brokers:
+This is implemented differently per broker:
 - **RabbitMQ**: Queue names are `{topic}-{subscriptionId}`
-- **Google Pub/Sub**: Subscription names are `{topic}-{subscriptionId}`
+- **Google Pub/Sub**: Subscription names are `{subscriptionId}`
 
 ### 4. Worker Pool Architecture
 

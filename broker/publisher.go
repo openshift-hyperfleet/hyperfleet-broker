@@ -16,14 +16,16 @@ type Publisher interface {
 	Publish(ctx context.Context, topic string, event *event.Event) error
 	// Health checks if the underlying broker connection is healthy.
 	// Returns nil if healthy, or an error describing the failure.
-	Health() error
+	// The provided context controls the deadline/cancellation of the check.
+	Health(ctx context.Context) error
 	// Close closes the underlying publisher
 	Close() error
 }
 
 // healthCheckFunc is a function that checks broker connectivity.
 // Returns nil if healthy, or an error describing the failure.
-type healthCheckFunc func() error
+// The provided context controls the deadline/cancellation of the check.
+type healthCheckFunc func(ctx context.Context) error
 
 // publisher wraps a Watermill publisher and provides a simplified interface
 type publisher struct {
@@ -58,11 +60,12 @@ func (p *publisher) Publish(ctx context.Context, topic string, event *event.Even
 
 // Health checks if the underlying broker connection is healthy.
 // Returns nil if healthy, or an error describing the failure.
-func (p *publisher) Health() error {
+// The provided context controls the deadline/cancellation of the check.
+func (p *publisher) Health(ctx context.Context) error {
 	if p == nil || p.healthCheck == nil {
 		return fmt.Errorf("health check not configured")
 	}
-	return p.healthCheck()
+	return p.healthCheck(ctx)
 }
 
 // Close closes the underlying publisher and any health check resources.

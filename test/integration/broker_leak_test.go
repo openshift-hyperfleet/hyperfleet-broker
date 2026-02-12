@@ -147,9 +147,8 @@ func setupBrokerTest(t *testing.T, cfg brokerTestConfig) map[string]string {
 	return configMap
 }
 
-// ==================== MAIN TEST ====================
-// testGoroutineLeak demonstrates the goroutine leak in the current implementation
-// This test WILL FAIL, proving that goroutines are leaked after Close()
+// testGoroutineLeak verifies that Close() properly cleans up all goroutines
+// created by Subscribe(). Acts as a regression guard against goroutine leaks.
 func testGoroutineLeak(t *testing.T, cfg brokerTestConfig) {
 	configMap := setupBrokerTest(t, cfg)
 	pub, err := broker.NewPublisher(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), configMap)
@@ -214,9 +213,6 @@ func testGoroutineLeak(t *testing.T, cfg brokerTestConfig) {
 
 	// Close subscriber
 	t.Log("🛑 Calling Close()...")
-	t.Log("   Current Close() only calls s.sub.Close() (line 124)")
-	t.Log("   It does NOT wait for goroutines to finish")
-	t.Log("")
 
 	err = sub.Close()
 	require.NoError(t, err)
@@ -230,35 +226,15 @@ func testGoroutineLeak(t *testing.T, cfg brokerTestConfig) {
 	after := runtime.NumGoroutine()
 	leaked := after - before
 
-	t.Logf("📊 Goroutines AFTER Close(): %d", after)
+	t.Logf("📊 Goroutines AFTER Close(): %d (tolerance: %d)", after, cfg.leakTolerance)
 	t.Log("")
 
 	// RESULT
-	if leaked > 4 {
-		t.Logf("🔴 GOROUTINES LEAKED: %d", leaked)
-		t.Log("")
-		t.Log("❌ PROBLEM IDENTIFIED:")
-		t.Log("   1. Subscribe() creates goroutines but doesn't track them (no sync.WaitGroup)")
-		t.Log("   2. Close() doesn't wait for goroutines to terminate")
-		t.Log("   3. Goroutines become orphaned and continue consuming resources")
-		t.Log("")
-		t.Log("📝 PRODUCTION IMPACT:")
-		t.Log("   - Memory leak in long-running applications")
-		t.Log("   - File descriptor exhaustion")
-		t.Log("   - Messages processed after shutdown")
-		t.Log("   - Cannot do graceful restarts")
-		t.Log("")
-		t.Log("🔧 REQUIRED FIX:")
-		t.Log("   1. Add sync.WaitGroup to subscriber struct to track goroutines")
-		t.Log("   2. Add []context.CancelFunc to cancel all subscriptions")
-		t.Log("   3. Make Close() wait for WaitGroup with timeout")
-		t.Log("")
-
-		// Fail the test to prove the leak exists
+	if leaked > cfg.leakTolerance {
 		assert.FailNow(t,
-			fmt.Sprintf("GOROUTINE LEAK DETECTED! %d goroutines leaked after Close(). See logs above for details.", leaked))
+			fmt.Sprintf("GOROUTINE LEAK REGRESSION: %d goroutines leaked after Close() (tolerance: %d)", leaked, cfg.leakTolerance))
 	} else {
-		t.Logf("✅ OK: Only %d goroutines remaining (acceptable)", leaked)
+		t.Logf("✅ OK: Only %d goroutines remaining (acceptable, tolerance: %d)", leaked, cfg.leakTolerance)
 	}
 }
 
@@ -285,11 +261,12 @@ func TestGooglePubSubGoroutineLeak(t *testing.T) {
 		brokerType:     "googlepubsub",
 		setupSleep:     2 * time.Second,
 		receiveTimeout: 10 * time.Second,
+		leakTolerance:  4,
 	})
 }
 
 func testLeakIncreasesWithUsage(t *testing.T, cfg brokerTestConfig) {
-	t.Log("=== PROOF: Leak grows with each Subscribe() call ===")
+	t.Log("=== Verify goroutine count stays within tolerance as subscriptions grow ===")
 	t.Log("")
 
 	handler := func(ctx context.Context, evt *event.Event) error {
@@ -297,12 +274,11 @@ func testLeakIncreasesWithUsage(t *testing.T, cfg brokerTestConfig) {
 	}
 
 	testCases := []struct {
-		numSubscriptions int
-		expectedLeak     int
+		numSubscriptions int // number of Subscribe() calls to make
 	}{
-		{1, 4},  // 1 subscription = 4 goroutines
-		{3, 12}, // 3 subscriptions = 12 goroutines
-		{5, 20}, // 5 subscriptions = 20 goroutines
+		{1}, // single subscription
+		{3}, // moderate usage
+		{5}, // heavy usage
 	}
 
 	for _, tc := range testCases {
@@ -347,7 +323,7 @@ func testLeakIncreasesWithUsage(t *testing.T, cfg brokerTestConfig) {
 	t.Log("")
 }
 
-// TestRabbitMQLeakIncreasesWithUsage tests that leak grows with each Subscribe() call using RabbitMQ
+// TestRabbitMQLeakIncreasesWithUsage verifies goroutine cleanup scales with subscription count using RabbitMQ
 func TestRabbitMQLeakIncreasesWithUsage(t *testing.T) {
 	testLeakIncreasesWithUsage(t, brokerTestConfig{
 		brokerType:     "rabbitmq",
@@ -356,7 +332,7 @@ func TestRabbitMQLeakIncreasesWithUsage(t *testing.T) {
 	})
 }
 
-// TestGooglePubSubLeakIncreasesWithUsage tests that leak grows with each Subscribe() call using Google Pub/Sub
+// TestGooglePubSubLeakIncreasesWithUsage verifies goroutine cleanup scales with subscription count using Google Pub/Sub
 func TestGooglePubSubLeakIncreasesWithUsage(t *testing.T) {
 	testLeakIncreasesWithUsage(t, brokerTestConfig{
 		brokerType:     "googlepubsub",
@@ -461,21 +437,16 @@ func testMultipleSubscriptionsSameTopic(t *testing.T, cfg brokerTestConfig) {
 	after := runtime.NumGoroutine()
 	leaked := after - before
 
-	t.Logf("📊 Goroutines AFTER Close(): %d", after)
+	t.Logf("📊 Goroutines AFTER Close(): %d (tolerance: %d)", after, cfg.leakTolerance)
 	t.Logf("📊 Goroutines leaked: %d", leaked)
 	t.Log("")
 
 	// Verify no goroutine leaks
-	if leaked > 4 {
-		t.Logf("🔴 GOROUTINES LEAKED: %d", leaked)
-		t.Log("")
-		t.Log("❌ PROBLEM: Multiple subscriptions to the same topic leak goroutines")
-		t.Log("   Each Subscribe() call creates goroutines that are not properly cleaned up")
-		t.Log("")
+	if leaked > cfg.leakTolerance {
 		assert.FailNow(t,
-			fmt.Sprintf("GOROUTINE LEAK DETECTED! %d goroutines leaked after Close() with multiple subscriptions to same topic.", leaked))
+			fmt.Sprintf("GOROUTINE LEAK REGRESSION: %d goroutines leaked after Close() with multiple subscriptions to same topic (tolerance: %d)", leaked, cfg.leakTolerance))
 	} else {
-		t.Logf("✅ SUCCESS: Only %d goroutines remaining (acceptable)", leaked)
+		t.Logf("✅ SUCCESS: Only %d goroutines remaining (acceptable, tolerance: %d)", leaked, cfg.leakTolerance)
 		t.Log("   All goroutines from multiple subscriptions to the same topic were properly cleaned up")
 	}
 }
@@ -495,5 +466,6 @@ func TestGooglePubSubMultipleSubscriptionsSameTopic(t *testing.T) {
 		brokerType:     "googlepubsub",
 		setupSleep:     2 * time.Second,
 		receiveTimeout: 10 * time.Second,
+		leakTolerance:  4,
 	})
 }

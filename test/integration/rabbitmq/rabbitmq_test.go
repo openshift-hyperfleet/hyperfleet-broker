@@ -63,34 +63,6 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// SetupRabbitMQContainer starts a RabbitMQ testcontainer and returns the connection URL.
-// This is exported so it can be used by other test packages (e.g., integration_test).
-func SetupRabbitMQContainer(t *testing.T) string {
-	ctx := context.Background()
-
-	rabbitmqContainer, err := rabbitmq.Run(ctx,
-		"rabbitmq:3-management-alpine",
-		rabbitmq.WithAdminUsername("guest"),
-		rabbitmq.WithAdminPassword("guest"),
-		testcontainers.WithWaitStrategy(
-			wait.ForLog("Server startup complete").
-				WithOccurrence(1).
-				WithStartupTimeout(60*time.Second),
-		),
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		if err := rabbitmqContainer.Terminate(ctx); err != nil {
-			t.Logf("failed to terminate rabbitmq container: %v", err)
-		}
-	})
-
-	connectionString, err := rabbitmqContainer.AmqpURL(ctx)
-	require.NoError(t, err)
-
-	return connectionString
-}
-
 // TestPublisherSubscriber tests the full publish/subscribe flow with RabbitMQ
 func TestPublisherSubscriber(t *testing.T) {
 	configMap := common.BuildConfigMap("rabbitmq", sharedRabbitMQURL, "")
