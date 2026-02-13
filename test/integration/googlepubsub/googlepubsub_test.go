@@ -3,6 +3,7 @@ package googlepubsub_test
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"testing"
 	"time"
@@ -16,24 +17,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Re-export setup function for backward compatibility with test files
-// The actual implementation is in setup.go
+// sharedProjectID holds the project ID for the shared PubSub emulator container
+// created once in TestMain and reused across all tests in this package.
+var sharedProjectID string
 
-// TestMain sets up the test environment for Podman and disables Ryuk
+// TestMain sets up the test environment for Podman and disables Ryuk,
+// creates a shared PubSub emulator container, runs all tests, then terminates the container.
 func TestMain(m *testing.M) {
 	common.SetupTestEnvironment()
 
-	// Run tests
-	code := m.Run()
-	os.Exit(code)
-}
-
-// SetupPubSubEmulator starts a Google Pub/Sub emulator testcontainer and returns the project ID and emulator host
-// This is exported so it can be used by other test packages (e.g., performance tests)
-func SetupPubSubEmulator(t *testing.T) (string, string) {
 	ctx := context.Background()
 
-	// Create a generic container for Pub/Sub emulator
 	req := testcontainers.ContainerRequest{
 		Image:        "gcr.io/google.com/cloudsdktool/cloud-sdk:emulators",
 		ExposedPorts: []string{"8085/tcp"},
@@ -47,41 +41,48 @@ func SetupPubSubEmulator(t *testing.T) (string, string) {
 		ContainerRequest: req,
 		Started:          true,
 	})
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		if err := pubsubContainer.Terminate(ctx); err != nil {
-			t.Logf("failed to terminate pubsub container: %v", err)
-		}
-	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to start pubsub emulator container: %v\n", err)
+		os.Exit(1)
+	}
 
-	projectID := "test-project"
+	sharedProjectID = "test-project"
 
-	// Get the container host and port
 	host, err := pubsubContainer.Host(ctx)
-	require.NoError(t, err)
+	if err != nil {
+		_ = pubsubContainer.Terminate(ctx)
+		fmt.Fprintf(os.Stderr, "failed to get pubsub container host: %v\n", err)
+		os.Exit(1)
+	}
 
 	mappedPort, err := pubsubContainer.MappedPort(ctx, "8085")
-	require.NoError(t, err)
+	if err != nil {
+		_ = pubsubContainer.Terminate(ctx)
+		fmt.Fprintf(os.Stderr, "failed to get pubsub container mapped port: %v\n", err)
+		os.Exit(1)
+	}
 
 	emulatorHost := fmt.Sprintf("%s:%s", host, mappedPort.Port())
 
-	// Set environment variable for Pub/Sub emulator
 	if err := os.Setenv("PUBSUB_EMULATOR_HOST", emulatorHost); err != nil {
-		t.Fatalf("failed to set PUBSUB_EMULATOR_HOST: %v", err)
+		_ = pubsubContainer.Terminate(ctx)
+		fmt.Fprintf(os.Stderr, "failed to set PUBSUB_EMULATOR_HOST: %v\n", err)
+		os.Exit(1)
 	}
-	t.Cleanup(func() {
-		if err := os.Unsetenv("PUBSUB_EMULATOR_HOST"); err != nil {
-			t.Logf("failed to unset PUBSUB_EMULATOR_HOST: %v", err)
-		}
-	})
 
-	return projectID, emulatorHost
+	code := m.Run()
+
+	_ = os.Unsetenv("PUBSUB_EMULATOR_HOST")
+	if err := pubsubContainer.Terminate(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to terminate pubsub container: %v\n", err)
+	}
+
+	os.Exit(code)
 }
 
 // TestPublisherSubscriber tests the full publish/subscribe flow with Google Pub/Sub
 func TestPublisherSubscriber(t *testing.T) {
-	projectID, _ := SetupPubSubEmulator(t)
-	configMap := common.BuildConfigMap("googlepubsub", "", projectID)
+	configMap := common.BuildConfigMap("googlepubsub", "", sharedProjectID)
 
 	common.RunPublisherSubscriber(t, configMap, common.BrokerTestConfig{
 		BrokerType:     "googlepubsub",
@@ -92,8 +93,7 @@ func TestPublisherSubscriber(t *testing.T) {
 
 // TestMultipleEvents tests that multiple events are processed correctly
 func TestMultipleEvents(t *testing.T) {
-	projectID, _ := SetupPubSubEmulator(t)
-	configMap := common.BuildConfigMap("googlepubsub", "", projectID)
+	configMap := common.BuildConfigMap("googlepubsub", "", sharedProjectID)
 
 	common.RunMultipleEvents(t, configMap, common.BrokerTestConfig{
 		BrokerType:     "googlepubsub",
@@ -104,8 +104,7 @@ func TestMultipleEvents(t *testing.T) {
 
 // TestSharedSubscription tests that two subscribers with the same subscriptionID share messages
 func TestSharedSubscription(t *testing.T) {
-	projectID, _ := SetupPubSubEmulator(t)
-	configMap := common.BuildConfigMap("googlepubsub", "", projectID)
+	configMap := common.BuildConfigMap("googlepubsub", "", sharedProjectID)
 
 	common.RunSharedSubscription(t, configMap, common.BrokerTestConfig{
 		BrokerType:     "googlepubsub",
@@ -116,8 +115,7 @@ func TestSharedSubscription(t *testing.T) {
 
 // TestFanoutSubscription tests that two subscribers with different subscriptionIDs each get all messages
 func TestFanoutSubscription(t *testing.T) {
-	projectID, _ := SetupPubSubEmulator(t)
-	configMap := common.BuildConfigMap("googlepubsub", "", projectID)
+	configMap := common.BuildConfigMap("googlepubsub", "", sharedProjectID)
 
 	common.RunFanoutSubscription(t, configMap, common.BrokerTestConfig{
 		BrokerType:     "googlepubsub",
@@ -128,8 +126,7 @@ func TestFanoutSubscription(t *testing.T) {
 
 // TestSlowSubscriber tests that a slow subscriber processes fewer messages than a fast one
 func TestSlowSubscriber(t *testing.T) {
-	projectID, _ := SetupPubSubEmulator(t)
-	configMap := common.BuildConfigMap("googlepubsub", "", projectID)
+	configMap := common.BuildConfigMap("googlepubsub", "", sharedProjectID)
 
 	// Set MaxOutstandingMessages to 1 to limit how many messages can be in-flight
 	configMap["broker.googlepubsub.max_outstanding_messages"] = "1"
@@ -138,13 +135,13 @@ func TestSlowSubscriber(t *testing.T) {
 
 	// Create two subscribers with the same subscriptionID (shared subscription)
 	// but with different num_goroutines to simulate fast vs slow
-	subscriptionID := "slow-subscription"
+	subscriptionID := fmt.Sprintf("slow-subscription-%d", time.Now().UnixNano())
 	configMap["broker.googlepubsub.num_goroutines"] = "5"
-	sub1, err := broker.NewSubscriber(logger.NewTestLogger(), subscriptionID, configMap)
+	sub1, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), subscriptionID, configMap)
 	require.NoError(t, err)
 
 	configMap["broker.googlepubsub.num_goroutines"] = "1"
-	sub2, err := broker.NewSubscriber(logger.NewTestLogger(), subscriptionID, configMap)
+	sub2, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), subscriptionID, configMap)
 	require.NoError(t, err)
 
 	common.RunSlowSubscriber(t, configMap, common.BrokerTestConfig{
@@ -156,8 +153,7 @@ func TestSlowSubscriber(t *testing.T) {
 
 // TestErrorSubscriber tests that messages are redistributed when one subscriber fails
 func TestErrorSubscriber(t *testing.T) {
-	projectID, _ := SetupPubSubEmulator(t)
-	configMap := common.BuildConfigMap("googlepubsub", "", projectID)
+	configMap := common.BuildConfigMap("googlepubsub", "", sharedProjectID)
 
 	common.RunErrorSubscriber(t, configMap, common.BrokerTestConfig{
 		BrokerType:     "googlepubsub",
@@ -168,8 +164,7 @@ func TestErrorSubscriber(t *testing.T) {
 
 // TestCloseWaitsForInFlightMessages tests that Close() waits for in-flight message processing
 func TestCloseWaitsForInFlightMessages(t *testing.T) {
-	projectID, _ := SetupPubSubEmulator(t)
-	configMap := common.BuildConfigMap("googlepubsub", "", projectID)
+	configMap := common.BuildConfigMap("googlepubsub", "", sharedProjectID)
 
 	common.RunCloseWaitsForInFlightMessages(t, configMap, common.BrokerTestConfig{
 		BrokerType:     "googlepubsub",
@@ -180,8 +175,7 @@ func TestCloseWaitsForInFlightMessages(t *testing.T) {
 
 // TestPanicHandler tests that a handler that panics doesn't cause Close() to hang
 func TestPanicHandler(t *testing.T) {
-	projectID, _ := SetupPubSubEmulator(t)
-	configMap := common.BuildConfigMap("googlepubsub", "", projectID)
+	configMap := common.BuildConfigMap("googlepubsub", "", sharedProjectID)
 
 	common.RunPanicHandler(t, configMap, common.BrokerTestConfig{
 		BrokerType:     "googlepubsub",

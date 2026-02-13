@@ -13,6 +13,7 @@ The current implementation uses [Watermill](https://github.com/ThreeDotsLabs/wat
 - **Flexible Configuration**: YAML configuration files with environment variable overrides via Viper
 - **Worker Pools**: Configurable parallel message processing for subscribers
 - **Subscription Management**: Flexible subscription IDs for load balancing (shared subscriptions) or fanout (separate subscriptions)
+- **Health Checks**: Built-in `Health()` method on `Publisher` for readiness probes (per [HyperFleet Health Endpoints standard](https://github.com/openshift-hyperfleet/architecture/blob/main/hyperfleet/standards/health-endpoints.md))
 - **Simple API**: Clean, easy-to-use interface that hides Watermill complexity
 
 ## Installation
@@ -52,7 +53,7 @@ appLogger := logger.NewTestLogger()
 publisher, err := broker.NewPublisher(appLogger)
 
 // Use JSON format for the default logger
-appLogger := logger.NewTestLogger(logger.FormatJSON)
+appLogger := logger.NewTestLogger(logger.WithFormat(logger.FormatJSON))
 publisher, err := broker.NewPublisher(appLogger)
 
 // Use your own logger implementation with config
@@ -113,9 +114,23 @@ func main() {
 
 </details>
 
-Note for Google PubSub: The Google Pub/Sub publisher implementation (via Watermill/Google Cloud SDK) starts background goroutines (for batching, connection management, etc.). 
-The app should call Close() to not leak 
+Note for Google Pub/Sub: The Google Pub/Sub publisher implementation (via Watermill/Google Cloud SDK) starts background goroutines (for batching, connection management, etc.).
+The app should call `Close()` to avoid leaking these background goroutines and resources.
 
+### Health Check
+
+The `Publisher` interface exposes a `Health(ctx context.Context) error` method that consumers can use to verify broker connectivity, typically in `/readyz` endpoints:
+
+```go
+if err := publisher.Health(ctx); err != nil {
+    // Broker is unhealthy — return 503
+    log.Printf("Broker health check failed: %v", err)
+}
+```
+
+The health check implementation varies by broker:
+- **RabbitMQ**: Checks if the AMQP connection is open and not closed (in-memory, no network call)
+- **Google Pub/Sub**: Performs a lightweight `GetTopic` API call (3s timeout) on a non-existent probe topic to verify connectivity. A `NotFound` response confirms the round-trip succeeded. Requires the `pubsub.topics.get` permission, which is **not** included in `roles/pubsub.publisher`. You must grant an additional role such as `roles/pubsub.viewer`, `roles/pubsub.editor`, or a custom role containing `pubsub.topics.get`.
 
 <details>
 <summary><strong>Subscriber Example</strong></summary>
@@ -456,9 +471,9 @@ The subscription ID concept enables two messaging patterns:
 - **Load Balancing**: Multiple subscribers with the same subscription ID share messages
 - **Fanout**: Subscribers with different subscription IDs each receive all messages
 
-This is implemented consistently across brokers:
+This is implemented differently per broker:
 - **RabbitMQ**: Queue names are `{topic}-{subscriptionId}`
-- **Google Pub/Sub**: Subscription names are `{topic}-{subscriptionId}`
+- **Google Pub/Sub**: Subscription names are `{subscriptionId}`
 
 ### 4. Worker Pool Architecture
 

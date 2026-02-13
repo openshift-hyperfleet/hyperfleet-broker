@@ -77,6 +77,36 @@ func parseGoogleCloudDuration(s string) (time.Duration, error) {
 	return 0, fmt.Errorf("invalid duration format: %s", s)
 }
 
+// healthCheckTopicName is a non-existent topic used as a connectivity probe.
+// GetTopic returning NotFound proves the round-trip to Pub/Sub succeeded.
+const healthCheckTopicName = "hyperfleet-health-probe"
+
+// newGooglePubSubHealthCheck creates a health check function for a Google Pub/Sub publisher.
+// It reuses the provided pubsub.Client to perform a lightweight GetTopic API call
+// with a 3-second timeout to verify connectivity.
+// Requires pubsub.topics.get (not included in roles/pubsub.publisher; grant roles/pubsub.viewer or a custom role).
+// The caller is responsible for closing the client (via publisher.healthCloser).
+func newGooglePubSubHealthCheck(client *pubsub.Client, projectID string) healthCheckFunc {
+	fullTopicName := fmt.Sprintf("projects/%s/topics/%s", projectID, healthCheckTopicName)
+
+	return func(ctx context.Context) error {
+		ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		defer cancel()
+
+		_, err := client.TopicAdminClient.GetTopic(ctx, &pubsubpb.GetTopicRequest{
+			Topic: fullTopicName,
+		})
+		if err != nil {
+			// NotFound means the API is reachable — the topic just doesn't exist.
+			if st, ok := status.FromError(err); ok && st.Code() == codes.NotFound {
+				return nil
+			}
+			return fmt.Errorf("google pub/sub health check failed: %w", err)
+		}
+		return nil
+	}
+}
+
 // newGooglePubSubPublisher creates a Google Pub/Sub publisher
 func newGooglePubSubPublisher(cfg *config, logger watermill.LoggerAdapter) (message.Publisher, error) {
 	gps := cfg.Broker.GooglePubSub
@@ -161,8 +191,6 @@ func newGooglePubSubSubscriber(cfg *config, logger watermill.LoggerAdapter, subs
 	}
 
 	// Configure subscription name generator to use subscription ID
-	// The topic passed to Subscribe will be the original topic (no colon)
-	// We append subscription ID to create unique subscription names
 	pubsubConfig := googlepubsub.SubscriberConfig{
 		ProjectID: gps.ProjectID,
 		GenerateSubscriptionName: func(topic string) string {

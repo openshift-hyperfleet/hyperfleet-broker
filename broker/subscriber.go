@@ -43,6 +43,11 @@ type subscriber struct {
 	logger         logger.Logger // Broker logger (always present - default logger if not provided)
 	wg             sync.WaitGroup
 
+	// Routers and cancel functions for all subscriptions, used by Close() to ensure clean shutdown
+	routers     []*message.Router
+	cancelFns   []context.CancelFunc
+	routersMu   sync.Mutex
+
 	// Error notification channel
 	errorChan chan *SubscriberError
 
@@ -122,9 +127,27 @@ func (s *subscriber) Subscribe(ctx context.Context, topic string, handler Handle
 	// Log successful subscription setup
 	s.logger.Infof(ctx, "Successfully subscribed to topic %s subscription %s", topic, s.subscriptionID)
 
+	// Check if subscriber is already closed before launching the goroutine.
+	// This prevents calling wg.Add(1) after Close() has called wg.Wait().
+	s.closeMu.RLock()
+	if s.closed {
+		s.closeMu.RUnlock()
+		return fmt.Errorf("subscriber is closed")
+	}
+	s.closeMu.RUnlock()
+
+	// Create a cancelable context so Close() can signal routers to stop
+	routerCtx, routerCancel := context.WithCancel(ctx)
+	s.routersMu.Lock()
+	s.routers = append(s.routers, router)
+	s.cancelFns = append(s.cancelFns, routerCancel)
+	s.routersMu.Unlock()
+
 	// Run the router in the background
-	s.wg.Go(func() {
-		if err := router.Run(ctx); err != nil {
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		if err := router.Run(routerCtx); err != nil {
 			// Determine if this is fatal (connection lost) or recoverable
 			fatal := !isContextCanceled(err)
 
@@ -140,7 +163,7 @@ func (s *subscriber) Subscribe(ctx context.Context, topic string, handler Handle
 				Fatal:          fatal,
 			})
 		}
-	})
+	}()
 
 	return nil
 }
@@ -181,24 +204,44 @@ func (s *subscriber) sendError(err *SubscriberError) {
 	}
 }
 
-// Close closes the underlying subscriber
+// Close closes the underlying subscriber and all routers created by Subscribe().
 func (s *subscriber) Close() error {
+	// Mark as closed first to prevent new Subscribe() calls from racing with wg.Wait().
+	s.closeMu.Lock()
+	if s.closed {
+		s.closeMu.Unlock()
+		return nil
+	}
+	s.closed = true
+	s.closeMu.Unlock()
+
 	// Log close operation
 	s.logger.Info(context.Background(), "Closing subscriber")
 
-	// Closing the subscriber will stop all routers receiving messages
+	// Closing the underlying subscriber stops all routers from receiving new messages
 	err := s.sub.Close()
 	if err != nil {
 		s.logger.Errorf(context.Background(), "Failed to close underlying subscriber: %v", err)
 		return err
 	}
+
+	// Cancel all router contexts to force handlers to stop.
+	// This causes the Watermill Router's watchAllHandlersStopped to detect all handlers
+	// have stopped and call router.Close() automatically.
+	s.routersMu.Lock()
+	cancelFns := s.cancelFns
+	s.cancelFns = nil
+	s.routers = nil
+	s.routersMu.Unlock()
+
+	for _, cancel := range cancelFns {
+		cancel()
+	}
+
 	s.wg.Wait()
 
-	// Mark as closed and close error channel
-	s.closeMu.Lock()
-	s.closed = true
+	// Close error channel now that all goroutines have stopped
 	close(s.errorChan)
-	s.closeMu.Unlock()
 
 	s.logger.Info(context.Background(), "Successfully closed subscriber")
 	return nil

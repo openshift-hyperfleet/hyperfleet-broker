@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
+	"cloud.google.com/go/pubsub/v2"
 	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill/message"
 	"github.com/cloudevents/sdk-go/v2/event"
@@ -58,6 +60,8 @@ func NewPublisher(log logger.Logger, configMap ...map[string]string) (Publisher,
 	}
 
 	var pub message.Publisher
+	var hc healthCheckFunc
+	var healthCloser io.Closer
 
 	switch cfg.Broker.Type {
 	case "rabbitmq":
@@ -65,18 +69,33 @@ func NewPublisher(log logger.Logger, configMap ...map[string]string) (Publisher,
 		if err != nil {
 			return nil, fmt.Errorf("failed to create RabbitMQ publisher: %w", err)
 		}
+		hc = newRabbitMQHealthCheck(pub)
 	case "googlepubsub":
 		pub, err = newGooglePubSubPublisher(cfg, watermillLogger)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create Google Pub/Sub publisher: %w", err)
 		}
+
+		// Create a persistent Pub/Sub client for health checks, reused across calls.
+		var healthClient *pubsub.Client
+		healthClient, err = pubsub.NewClient(context.Background(), cfg.Broker.GooglePubSub.ProjectID)
+		if err != nil {
+			if closeErr := pub.Close(); closeErr != nil {
+				return nil, fmt.Errorf("failed to create health check client: %w (also failed to close publisher: %v)", err, closeErr)
+			}
+			return nil, fmt.Errorf("failed to create health check client: %w", err)
+		}
+		hc = newGooglePubSubHealthCheck(healthClient, cfg.Broker.GooglePubSub.ProjectID)
+		healthCloser = healthClient
 	default:
 		return nil, fmt.Errorf("unsupported broker type: %s", cfg.Broker.Type)
 	}
 
 	return &publisher{
-		pub:    pub,
-		logger: log,
+		pub:          pub,
+		logger:       log,
+		healthCheck:  hc,
+		healthCloser: healthCloser,
 	}, nil
 }
 

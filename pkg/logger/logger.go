@@ -38,6 +38,28 @@ const (
 	FormatJSON                     // JSON format
 )
 
+// TestLoggerOption configures the test logger
+type TestLoggerOption func(*testLoggerOptions)
+
+type testLoggerOptions struct {
+	format OutputFormat
+	level  slog.Level
+}
+
+// WithFormat sets the output format for the test logger.
+func WithFormat(format OutputFormat) TestLoggerOption {
+	return func(o *testLoggerOptions) {
+		o.format = format
+	}
+}
+
+// WithLevel sets the minimum log level for the test logger.
+func WithLevel(level slog.Level) TestLoggerOption {
+	return func(o *testLoggerOptions) {
+		o.level = level
+	}
+}
+
 // testLogger provides a simple logger implementation using slog with HyperFleet format
 type testLogger struct {
 	logger *slog.Logger
@@ -45,23 +67,26 @@ type testLogger struct {
 
 // NewTestLogger creates a logger for testing and examples.
 // Production applications should implement the Logger interface with their own logging infrastructure.
-// If no format is specified, defaults to text format.
-func NewTestLogger(format ...OutputFormat) Logger {
-	// Default to text format if no format specified
-	selectedFormat := FormatText
-	if len(format) > 0 {
-		selectedFormat = format[0]
+// Defaults to text format at INFO level. Use WithFormat and WithLevel to customize.
+func NewTestLogger(opts ...TestLoggerOption) Logger {
+	options := &testLoggerOptions{
+		format: FormatText,
+		level:  slog.LevelInfo,
 	}
+	for _, opt := range opts {
+		opt(options)
+	}
+
 	var handler slog.Handler
 
-	switch selectedFormat {
+	switch options.format {
 	case FormatJSON:
 		handler = slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-			Level: slog.LevelInfo,
+			Level: options.level,
 		})
 	default:
 		handler = slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-			Level: slog.LevelInfo,
+			Level: options.level,
 		})
 	}
 
