@@ -34,9 +34,10 @@ func main() {
 	message := flag.String("message", "", "Send a single message with this content and exit")
 	flag.Parse()
 
-	// Create logger and publisher
+	// Create logger, metrics, and publisher
 	appLogger := logger.NewTestLogger()
-	publisher, err := broker.NewPublisher(appLogger)
+	metrics := broker.NewMetricsRecorder("example-publisher", "v0.0.0", nil)
+	publisher, err := broker.NewPublisher(appLogger, metrics)
 	if err != nil {
 		log.Fatalf("Failed to create publisher: %v", err)
 	}

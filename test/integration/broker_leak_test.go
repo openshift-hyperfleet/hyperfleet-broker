@@ -151,7 +151,7 @@ func setupBrokerTest(t *testing.T, cfg brokerTestConfig) map[string]string {
 // created by Subscribe(). Acts as a regression guard against goroutine leaks.
 func testGoroutineLeak(t *testing.T, cfg brokerTestConfig) {
 	configMap := setupBrokerTest(t, cfg)
-	pub, err := broker.NewPublisher(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), configMap)
+	pub, err := broker.NewPublisher(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), common.NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 
 	// Clean up environment
@@ -160,7 +160,7 @@ func testGoroutineLeak(t *testing.T, cfg brokerTestConfig) {
 	before := runtime.NumGoroutine()
 	t.Logf("📊 Goroutines BEFORE: %d", before)
 
-	sub, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), "leak-demo", configMap)
+	sub, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), "leak-demo", common.NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -288,7 +288,7 @@ func testLeakIncreasesWithUsage(t *testing.T, cfg brokerTestConfig) {
 
 			configMap := setupBrokerTest(t, cfg)
 
-			sub, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), "leak-demo", configMap)
+			sub, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), "leak-demo", common.NewTestMetrics(t), configMap)
 			require.NoError(t, err)
 
 			ctx := context.Background()
@@ -359,10 +359,10 @@ func testMultipleSubscriptionsSameTopic(t *testing.T, cfg brokerTestConfig) {
 	t.Logf("📊 Goroutines BEFORE: %d", before)
 
 	// Create publisher and subscriber
-	pub, err := broker.NewPublisher(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), configMap)
+	pub, err := broker.NewPublisher(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), common.NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 
-	sub, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), "same-topic-test", configMap)
+	sub, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), "same-topic-test", common.NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 
 	ctx := context.Background()

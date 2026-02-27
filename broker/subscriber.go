@@ -54,6 +54,8 @@ type subscriber struct {
 	// Track if closed to prevent sending on closed channel
 	closed  bool
 	closeMu sync.RWMutex
+
+	metrics *MetricsRecorder
 }
 
 // Subscribe subscribes to a topic and processes messages with the provided handler
@@ -90,21 +92,29 @@ func (s *subscriber) Subscribe(ctx context.Context, topic string, handler Handle
 		// Log message received - logger is guaranteed non-nil
 		s.logger.Debugf(msgCtx, "Received message from topic %s", topic)
 
+		// Record message consumed
+		s.metrics.RecordConsumed(topic)
+
 		// Convert Watermill message to CloudEvent
 		evt, err := messageToEvent(msg)
 		if err != nil {
 			s.logger.Errorf(msgCtx, "Failed to convert message to CloudEvent: %v", err)
+			s.metrics.RecordError(topic, "conversion")
 			// If conversion fails, we return error which triggers Nack/Retry
 			// If it's a permanent error (malformed), Retry middleware will give up after MaxRetries
 			// and message will be Nacked (or sent to PoisonQueue if configured, but here just Nacked)
 			return fmt.Errorf("failed to convert message to CloudEvent: %w", err)
 		}
 
-		// Process the event with the handler
+		// Process the event with the handler and measure duration
 		// IMPORTANT: Pass msg.Context() to preserve tracing/metadata
+		start := time.Now()
 		err = handler(msgCtx, evt)
+		s.metrics.RecordDuration(topic, time.Since(start))
+
 		if err != nil {
 			s.logger.Errorf(msgCtx, "Handler failed to process event: %v", err)
+			s.metrics.RecordError(topic, "handler")
 		} else {
 			s.logger.Debugf(msgCtx, "Successfully processed event %s from topic %s subscription %s", evt.ID(), topic, s.subscriptionID)
 		}

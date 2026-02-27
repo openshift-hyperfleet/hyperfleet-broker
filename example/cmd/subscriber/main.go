@@ -26,10 +26,11 @@ func main() {
 		instanceID = "1"
 	}
 
-	// Create logger and subscriber with subscription ID
+	// Create logger, metrics, and subscriber with subscription ID
 	// Both subscribers use the same subscription ID to share messages (load balancing)
 	appLogger := logger.NewTestLogger()
-	subscriber, err := broker.NewSubscriber(appLogger, *subscription)
+	metrics := broker.NewMetricsRecorder("example-subscriber", "v0.0.0", nil)
+	subscriber, err := broker.NewSubscriber(appLogger, *subscription, metrics)
 	if err != nil {
 		log.Fatalf("Failed to create subscriber: %v", err)
 	}
