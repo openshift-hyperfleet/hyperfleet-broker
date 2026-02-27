@@ -113,7 +113,7 @@ func TestSubscriptionID(t *testing.T) {
 	ctx := context.Background()
 	configMap := common.BuildConfigMap("rabbitmq", sharedRabbitMQURL, "")
 
-	pub, err := broker.NewPublisher(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), configMap)
+	pub, err := broker.NewPublisher(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), common.NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
 		if err := pub.Close(); err != nil {
@@ -122,7 +122,7 @@ func TestSubscriptionID(t *testing.T) {
 	}()
 
 	// Create two subscribers with different subscription IDs
-	sub1, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), "subscription-1", configMap)
+	sub1, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), "subscription-1", common.NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
 		if err := sub1.Close(); err != nil {
@@ -130,7 +130,7 @@ func TestSubscriptionID(t *testing.T) {
 		}
 	}()
 
-	sub2, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), "subscription-2", configMap)
+	sub2, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), "subscription-2", common.NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
 		if err := sub2.Close(); err != nil {
@@ -192,10 +192,10 @@ func TestSlowSubscriber(t *testing.T) {
 	configMap := common.BuildConfigMap("rabbitmq", sharedRabbitMQURL, "")
 
 	subscriptionID := fmt.Sprintf("slow-subscription-%d", time.Now().UnixNano())
-	sub1, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), subscriptionID, configMap)
+	sub1, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), subscriptionID, common.NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 
-	sub2, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), subscriptionID, configMap)
+	sub2, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), subscriptionID, common.NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 
 	common.RunSlowSubscriber(t, configMap, common.BrokerTestConfig{

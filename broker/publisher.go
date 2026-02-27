@@ -32,7 +32,8 @@ type publisher struct {
 	pub          message.Publisher
 	logger       logger.Logger // Caller's logger (always present - default logger if not provided)
 	healthCheck  healthCheckFunc
-	healthCloser io.Closer // optional resource to close with publisher (e.g. Pub/Sub health check client)
+	healthCloser io.Closer          // optional resource to close with publisher (e.g. Pub/Sub health check client)
+	metrics      *MetricsRecorder
 }
 
 // Publish publishes a CloudEvent to the specified topic with context
@@ -44,6 +45,7 @@ func (p *publisher) Publish(ctx context.Context, topic string, event *event.Even
 	msg, err := eventToMessage(event)
 	if err != nil {
 		p.logger.Errorf(ctx, "Failed to convert CloudEvent to message: %v", err)
+		p.metrics.RecordError(topic, "conversion")
 		return err
 	}
 
@@ -51,9 +53,11 @@ func (p *publisher) Publish(ctx context.Context, topic string, event *event.Even
 	err = p.pub.Publish(topic, msg)
 	if err != nil {
 		p.logger.Errorf(ctx, "Failed to publish message to topic: %v", err)
+		p.metrics.RecordError(topic, "publish")
 		return err
 	}
 
+	p.metrics.RecordPublished(topic)
 	p.logger.Debugf(ctx, "Successfully published event %s to topic %s", event.ID(), topic)
 	return nil
 }

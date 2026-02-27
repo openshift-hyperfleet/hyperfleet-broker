@@ -137,11 +137,11 @@ func TestSlowSubscriber(t *testing.T) {
 	// but with different num_goroutines to simulate fast vs slow
 	subscriptionID := fmt.Sprintf("slow-subscription-%d", time.Now().UnixNano())
 	configMap["broker.googlepubsub.num_goroutines"] = "5"
-	sub1, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), subscriptionID, configMap)
+	sub1, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), subscriptionID, common.NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 
 	configMap["broker.googlepubsub.num_goroutines"] = "1"
-	sub2, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), subscriptionID, configMap)
+	sub2, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), subscriptionID, common.NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 
 	common.RunSlowSubscriber(t, configMap, common.BrokerTestConfig{

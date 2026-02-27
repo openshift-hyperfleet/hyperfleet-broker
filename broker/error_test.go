@@ -4,8 +4,14 @@ import (
 	"testing"
 
 	"github.com/openshift-hyperfleet/hyperfleet-broker/pkg/logger"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 )
+
+func newErrorTestMetrics(t *testing.T) *MetricsRecorder {
+	t.Helper()
+	return NewMetricsRecorder("test", "v0.0.0", prometheus.NewRegistry())
+}
 
 func TestNewPublisherErrorHandling(t *testing.T) {
 	tests := []struct {
@@ -65,10 +71,11 @@ func TestNewPublisherErrorHandling(t *testing.T) {
 			var err error
 
 			mockLogger := logger.NewMockLogger()
+			metrics := newErrorTestMetrics(t)
 			if tt.configMap == nil {
-				pub, err = NewPublisher(mockLogger)
+				pub, err = NewPublisher(mockLogger, metrics)
 			} else {
-				pub, err = NewPublisher(mockLogger, tt.configMap)
+				pub, err = NewPublisher(mockLogger, metrics, tt.configMap)
 			}
 
 			if tt.expectError {
@@ -154,10 +161,11 @@ func TestNewSubscriberErrorHandling(t *testing.T) {
 			var err error
 
 			mockLogger := logger.NewMockLogger()
+			metrics := newErrorTestMetrics(t)
 			if tt.configMap == nil {
-				sub, err = NewSubscriber(mockLogger, tt.subscriptionID)
+				sub, err = NewSubscriber(mockLogger, tt.subscriptionID, metrics)
 			} else {
-				sub, err = NewSubscriber(mockLogger, tt.subscriptionID, tt.configMap)
+				sub, err = NewSubscriber(mockLogger, tt.subscriptionID, metrics, tt.configMap)
 			}
 
 			if tt.expectError {
@@ -192,7 +200,8 @@ func TestPublisherPublishErrorHandling(t *testing.T) {
 	}
 
 	mockLogger := logger.NewMockLogger()
-	_, err := NewPublisher(mockLogger, configMap)
+	metrics := newErrorTestMetrics(t)
+	_, err := NewPublisher(mockLogger, metrics, configMap)
 	assert.Error(t, err)
 }
 

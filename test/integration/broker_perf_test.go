@@ -52,7 +52,7 @@ func TestRabbitMQPerformance(t *testing.T) {
 	configMap := common.BuildConfigMap("rabbitmq", sharedRabbitMQURL, "")
 
 	// Create publisher
-	pub, err := broker.NewPublisher(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), configMap)
+	pub, err := broker.NewPublisher(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), common.NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
 		if err := pub.Close(); err != nil {
@@ -62,7 +62,7 @@ func TestRabbitMQPerformance(t *testing.T) {
 
 	// Create two subscribers with the same subscriptionID (shared subscription)
 	subscriptionID := "perf-subscription"
-	sub1, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), subscriptionID, configMap)
+	sub1, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), subscriptionID, common.NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
 		if err := sub1.Close(); err != nil {
@@ -70,7 +70,7 @@ func TestRabbitMQPerformance(t *testing.T) {
 		}
 	}()
 
-	sub2, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), subscriptionID, configMap)
+	sub2, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), subscriptionID, common.NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
 		if err := sub2.Close(); err != nil {
@@ -199,7 +199,7 @@ func TestGooglePubSubPerformance(t *testing.T) {
 	configMap["subscriber.parallelism"] = "10"
 	configMap["broker.googlepubsub.num_goroutines"] = "10"
 	// Create publisher
-	pub, err := broker.NewPublisher(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), configMap)
+	pub, err := broker.NewPublisher(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), common.NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
 		if err := pub.Close(); err != nil {
@@ -209,7 +209,7 @@ func TestGooglePubSubPerformance(t *testing.T) {
 
 	// Create two subscribers with the same subscriptionID (shared subscription)
 	subscriptionID := "perf-subscription"
-	sub1, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), subscriptionID, configMap)
+	sub1, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), subscriptionID, common.NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
 		if err := sub1.Close(); err != nil {
@@ -217,7 +217,7 @@ func TestGooglePubSubPerformance(t *testing.T) {
 		}
 	}()
 
-	sub2, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), subscriptionID, configMap)
+	sub2, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), subscriptionID, common.NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
 		if err := sub2.Close(); err != nil {

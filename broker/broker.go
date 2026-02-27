@@ -21,13 +21,16 @@ const (
 	DefaultShutdownTimeout       = 30 * time.Second
 )
 
-// NewPublisher creates a new publisher with a required logger and optional configuration.
+// NewPublisher creates a new publisher with the provided logger, metrics recorder, and optional configuration.
 // Usage:
-//   - NewPublisher(logger) - uses provided logger and loads config from file
-//   - NewPublisher(logger, configMap) - uses provided logger with config map
-func NewPublisher(log logger.Logger, configMap ...map[string]string) (Publisher, error) {
+//   - NewPublisher(logger, metrics) - uses provided logger and loads config from file
+//   - NewPublisher(logger, metrics, configMap) - uses provided logger with config map
+func NewPublisher(log logger.Logger, metrics *MetricsRecorder, configMap ...map[string]string) (Publisher, error) {
 	if log == nil {
 		return nil, fmt.Errorf("logger is required")
+	}
+	if metrics == nil {
+		return nil, fmt.Errorf("metrics is required")
 	}
 
 	var cfg *config
@@ -96,19 +99,23 @@ func NewPublisher(log logger.Logger, configMap ...map[string]string) (Publisher,
 		logger:       log,
 		healthCheck:  hc,
 		healthCloser: healthCloser,
+		metrics:      metrics,
 	}, nil
 }
 
-// NewSubscriber creates a new subscriber with a required logger and optional configuration.
+// NewSubscriber creates a new subscriber with the provided logger, subscription ID, metrics recorder, and optional configuration.
 // Usage:
-//   - NewSubscriber(logger, "id") - uses provided logger and loads config from file
-//   - NewSubscriber(logger, "id", configMap) - uses provided logger with config map
-func NewSubscriber(log logger.Logger, subscriptionID string, configMap ...map[string]string) (Subscriber, error) {
+//   - NewSubscriber(logger, "id", metrics) - uses provided logger and loads config from file
+//   - NewSubscriber(logger, "id", metrics, configMap) - uses provided logger with config map
+func NewSubscriber(log logger.Logger, subscriptionID string, metrics *MetricsRecorder, configMap ...map[string]string) (Subscriber, error) {
 	if subscriptionID == "" {
 		return nil, fmt.Errorf("subscriptionID is required")
 	}
 	if log == nil {
 		return nil, fmt.Errorf("logger is required")
+	}
+	if metrics == nil {
+		return nil, fmt.Errorf("metrics is required")
 	}
 
 	var cfg *config
@@ -165,6 +172,7 @@ func NewSubscriber(log logger.Logger, subscriptionID string, configMap ...map[st
 		subscriptionID: subscriptionID,
 		logger:         log,
 		errorChan:      make(chan *SubscriberError, ErrorChannelBufferSize),
+		metrics:        metrics,
 	}, nil
 }
 

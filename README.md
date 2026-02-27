@@ -14,6 +14,7 @@ The current implementation uses [Watermill](https://github.com/ThreeDotsLabs/wat
 - **Worker Pools**: Configurable parallel message processing for subscribers
 - **Subscription Management**: Flexible subscription IDs for load balancing (shared subscriptions) or fanout (separate subscriptions)
 - **Health Checks**: Built-in `Health()` method on `Publisher` for readiness probes (per [HyperFleet Health Endpoints standard](https://github.com/openshift-hyperfleet/architecture/blob/main/hyperfleet/standards/health-endpoints.md))
+- **Prometheus Metrics**: Built-in instrumentation with `MetricsRecorder` (per [HyperFleet Metrics Standard](https://github.com/openshift-hyperfleet/architecture/blob/main/hyperfleet/standards/metrics.md))
 - **Simple API**: Clean, easy-to-use interface that hides Watermill complexity
 
 ## Installation
@@ -48,17 +49,20 @@ This interface matches the HyperFleet adapter logger interface, ensuring consist
 ### Usage Examples
 
 ```go
+// Create metrics recorder (required)
+metrics := broker.NewMetricsRecorder("my-component", "v1.0.0", prometheus.DefaultRegisterer)
+
 // Use the default logger
 appLogger := logger.NewTestLogger()
-publisher, err := broker.NewPublisher(appLogger)
+publisher, err := broker.NewPublisher(appLogger, metrics)
 
 // Use JSON format for the default logger
 appLogger := logger.NewTestLogger(logger.WithFormat(logger.FormatJSON))
-publisher, err := broker.NewPublisher(appLogger)
+publisher, err := broker.NewPublisher(appLogger, metrics)
 
 // Use your own logger implementation with config
 myLogger := createMyApplicationLogger()
-publisher, err := broker.NewPublisher(myLogger, config)
+publisher, err := broker.NewPublisher(myLogger, metrics, config)
 ```
 
 ## Quick Start
@@ -78,12 +82,14 @@ import (
     "github.com/cloudevents/sdk-go/v2/event"
     "github.com/openshift-hyperfleet/hyperfleet-broker/broker"
     "github.com/openshift-hyperfleet/hyperfleet-broker/pkg/logger"
+    "github.com/prometheus/client_golang/prometheus"
 )
 
 func main() {
-    // Create logger and publisher
+    // Create logger, metrics, and publisher
     appLogger := logger.NewTestLogger()
-    publisher, err := broker.NewPublisher(appLogger)
+    metrics := broker.NewMetricsRecorder("example-publisher", "v1.0.0", prometheus.DefaultRegisterer)
+    publisher, err := broker.NewPublisher(appLogger, metrics)
     if err != nil {
         log.Fatalf("Failed to create publisher: %v", err)
     }
@@ -148,15 +154,17 @@ import (
     "github.com/cloudevents/sdk-go/v2/event"
     "github.com/openshift-hyperfleet/hyperfleet-broker/broker"
     "github.com/openshift-hyperfleet/hyperfleet-broker/pkg/logger"
+    "github.com/prometheus/client_golang/prometheus"
 )
 
 func main() {
-    // Create logger and subscriber with subscription ID
+    // Create logger, metrics, and subscriber with subscription ID
     // Subscribers with the same subscription ID share messages (load balancing)
     // Subscribers with different IDs receive all messages (fanout)
     appLogger := logger.NewTestLogger()
+    metrics := broker.NewMetricsRecorder("example-subscriber", "v1.0.0", prometheus.DefaultRegisterer)
     subscriptionID := "shared-subscription"
-    subscriber, err := broker.NewSubscriber(appLogger, subscriptionID)
+    subscriber, err := broker.NewSubscriber(appLogger, subscriptionID, metrics)
     if err != nil {
         log.Fatalf("Failed to create subscriber: %v", err)
     }
@@ -437,17 +445,54 @@ You can also provide configuration programmatically using a map:
 
 ```go
 appLogger := logger.NewTestLogger()
+metrics := broker.NewMetricsRecorder("my-component", "v1.0.0", prometheus.DefaultRegisterer)
 configMap := map[string]string{
     "broker.type": "rabbitmq",
     "broker.rabbitmq.url": "amqp://user:pass@localhost:5672/",
     "subscriber.parallelism": "5",
 }
 
-publisher, err := broker.NewPublisher(appLogger, configMap)
-subscriber, err := broker.NewSubscriber(appLogger, "my-subscription", configMap)
+publisher, err := broker.NewPublisher(appLogger, metrics, configMap)
+subscriber, err := broker.NewSubscriber(appLogger, "my-subscription", metrics, configMap)
 ```
 
 </details>
+
+## Prometheus Metrics
+
+The library provides Prometheus metrics via `MetricsRecorder`. All metrics follow the [HyperFleet Metrics Standard](https://github.com/openshift-hyperfleet/architecture/blob/main/hyperfleet/standards/metrics.md) and use the `hyperfleet_broker_` prefix.
+
+A `MetricsRecorder` is required when creating publishers and subscribers:
+
+```go
+metrics := broker.NewMetricsRecorder("my-component", "v1.0.0", prometheus.DefaultRegisterer)
+
+publisher, err := broker.NewPublisher(appLogger, metrics)
+subscriber, err := broker.NewSubscriber(appLogger, "my-subscription", metrics)
+```
+
+### Exported Metrics
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `hyperfleet_broker_messages_consumed_total` | Counter | `topic`, `component`, `version` | Total messages consumed from the broker |
+| `hyperfleet_broker_messages_published_total` | Counter | `topic`, `component`, `version` | Total messages published to the broker |
+| `hyperfleet_broker_errors_total` | Counter | `topic`, `error_type`, `component`, `version` | Total message processing errors |
+| `hyperfleet_broker_message_duration_seconds` | Histogram | `topic`, `component`, `version` | Duration of message handler execution |
+
+### Error Types
+
+The `error_type` label on `hyperfleet_broker_errors_total` can have the following values:
+
+| Value | Description |
+|-------|-------------|
+| `conversion` | Failed to convert between CloudEvent and Watermill message format |
+| `handler` | The user-provided handler returned an error |
+| `publish` | The underlying broker rejected the publish operation |
+
+### Duration Buckets
+
+The `hyperfleet_broker_message_duration_seconds` histogram uses the following buckets (in seconds): `0.1, 0.5, 1, 2, 5, 10, 30, 60, 120`.
 
 ## Main Architectural Decisions
 
