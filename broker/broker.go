@@ -100,6 +100,7 @@ func NewPublisher(log logger.Logger, metrics *MetricsRecorder, configMap ...map[
 		healthCheck:  hc,
 		healthCloser: healthCloser,
 		metrics:      metrics,
+		brokerType:   cfg.Broker.Type,
 	}, nil
 }
 
@@ -170,6 +171,7 @@ func NewSubscriber(log logger.Logger, subscriptionID string, metrics *MetricsRec
 		sub:            sub,
 		parallelism:    parallelism,
 		subscriptionID: subscriptionID,
+		brokerType:     cfg.Broker.Type,
 		logger:         log,
 		errorChan:      make(chan *SubscriberError, ErrorChannelBufferSize),
 		metrics:        metrics,

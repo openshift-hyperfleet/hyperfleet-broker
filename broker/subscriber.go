@@ -27,6 +27,8 @@ type Subscriber interface {
 	Errors() <-chan *SubscriberError
 	// Close closes the underlying subscriber
 	Close() error
+	// BrokerType returns the configured broker type (e.g. "rabbitmq", "googlepubsub")
+	BrokerType() string
 }
 
 const (
@@ -40,13 +42,14 @@ type subscriber struct {
 	sub            message.Subscriber
 	parallelism    int
 	subscriptionID string
+	brokerType     string
 	logger         logger.Logger // Broker logger (always present - default logger if not provided)
 	wg             sync.WaitGroup
 
 	// Routers and cancel functions for all subscriptions, used by Close() to ensure clean shutdown
-	routers     []*message.Router
-	cancelFns   []context.CancelFunc
-	routersMu   sync.Mutex
+	routers   []*message.Router
+	cancelFns []context.CancelFunc
+	routersMu sync.Mutex
 
 	// Error notification channel
 	errorChan chan *SubscriberError
@@ -176,6 +179,11 @@ func (s *subscriber) Subscribe(ctx context.Context, topic string, handler Handle
 	}()
 
 	return nil
+}
+
+// BrokerType returns the configured broker type
+func (s *subscriber) BrokerType() string {
+	return s.brokerType
 }
 
 // Errors returns the error notification channel
