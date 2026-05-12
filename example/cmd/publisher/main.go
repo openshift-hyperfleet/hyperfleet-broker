@@ -54,7 +54,7 @@ func main() {
 	}
 
 	// Continuous publishing mode
-	log.Printf("Publisher started. Publishing events to topic: %s with interval: %v", *topic, *interval)
+	log.Printf("Publisher started. Publishing events to topic: %s with interval: %v, broker type: %s", *topic, *interval, publisher.BrokerType())
 	log.Printf("Press Ctrl+C to stop...")
 
 	// Publish events

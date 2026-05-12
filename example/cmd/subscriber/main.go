@@ -39,7 +39,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	log.Printf("Subscriber instance %s started. Listening on topic: %s with subscription ID: %s", instanceID, *topic, *subscription)
+	log.Printf("Subscriber instance %s started. Listening on topic: %s with subscription ID: %s, broker type: %s", instanceID, *topic, *subscription, subscriber.BrokerType())
 
 	// Start error handler goroutine to monitor infrastructure errors
 	go func() {

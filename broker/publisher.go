@@ -20,6 +20,8 @@ type Publisher interface {
 	Health(ctx context.Context) error
 	// Close closes the underlying publisher
 	Close() error
+	// BrokerType returns the configured broker type (e.g. "rabbitmq", "googlepubsub")
+	BrokerType() string
 }
 
 // healthCheckFunc is a function that checks broker connectivity.
@@ -32,8 +34,9 @@ type publisher struct {
 	pub          message.Publisher
 	logger       logger.Logger // Caller's logger (always present - default logger if not provided)
 	healthCheck  healthCheckFunc
-	healthCloser io.Closer          // optional resource to close with publisher (e.g. Pub/Sub health check client)
+	healthCloser io.Closer // optional resource to close with publisher (e.g. Pub/Sub health check client)
 	metrics      *MetricsRecorder
+	brokerType   string
 }
 
 // Publish publishes a CloudEvent to the specified topic with context
@@ -70,6 +73,11 @@ func (p *publisher) Health(ctx context.Context) error {
 		return fmt.Errorf("health check not configured")
 	}
 	return p.healthCheck(ctx)
+}
+
+// BrokerType returns the configured broker type
+func (p *publisher) BrokerType() string {
+	return p.brokerType
 }
 
 // Close closes the underlying publisher and any health check resources.
