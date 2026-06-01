@@ -560,7 +560,9 @@ func RunErrorSubscriber(t *testing.T, configMap map[string]string, cfg BrokerTes
 func RunCloseWaitsForInFlightMessages(t *testing.T, configMap map[string]string, cfg BrokerTestConfig) {
 	topic := uniqueTopic("close-test-topic")
 	ctx := context.Background()
-	configMap["subscriber.parallelism"] = "6"
+	if cfg.BrokerType == "rabbitmq" {
+		configMap["subscriber.parallelism"] = "6"
+	}
 	pub, err := broker.NewPublisher(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
@@ -643,7 +645,9 @@ func RunCloseWaitsForInFlightMessages(t *testing.T, configMap map[string]string,
 func RunPanicHandler(t *testing.T, configMap map[string]string, cfg BrokerTestConfig) {
 	topic := uniqueTopic("panic-test-topic")
 	ctx := context.Background()
-	configMap["subscriber.parallelism"] = "3"
+	if cfg.BrokerType == "rabbitmq" {
+		configMap["subscriber.parallelism"] = "3"
+	}
 	pub, err := broker.NewPublisher(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
