@@ -25,7 +25,7 @@ import (
 
 // Shared container URLs created once in TestMain and reused across all tests in this package.
 var (
-	sharedRabbitMQURL    string
+	sharedRabbitMQURL     string
 	sharedPubSubProjectID string
 )
 

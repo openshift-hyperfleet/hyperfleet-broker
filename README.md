@@ -251,6 +251,11 @@ broker:
     # Behavior flags (default: false - infrastructure must exist)
     create_topic_if_missing: true        # Auto-create topic if it doesn't exist
     create_subscription_if_missing: true # Auto-create subscription if it doesn't exist
+    
+    # Labels applied to the subscription at creation time (optional)
+    subscription_labels:
+      app: my-service
+      env: production
 
 # Subscriber Configuration
 subscriber:
@@ -381,6 +386,11 @@ After setting the maximun number of allowed "in flight" messages, further settin
     - Messages with the same ordering key are delivered in order.
   - **`broker.googlepubsub.retry_min_backoff`** / **`retry_max_backoff`** (0s-600s):
     - Minimum and maximum delay between delivery retries for failed messages.
+  - **`broker.googlepubsub.subscription_labels`** (default: none):
+    - Key-value labels to attach to the subscription at creation time.
+    - Applied only when the subscription is newly created (`create_subscription_if_missing: true`). Changing labels in config does **not** update an already-existing subscription.
+    - Label keys and values must follow [GCP label rules](https://docs.cloud.google.com/resource-manager/docs/labels-overview): lowercase letters, digits, hyphens, underscores; max 63 characters per key/value; max 64 labels per resource.
+    - Useful for cost attribution, environment tagging, or filtering in Cloud Monitoring.
   
   **Dead Letter Settings:**
   - **`broker.googlepubsub.dead_letter_topic`**:

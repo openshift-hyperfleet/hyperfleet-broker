@@ -91,7 +91,7 @@ func TestSharedSubscription(t *testing.T) {
 
 	common.RunSharedSubscription(t, configMap, common.BrokerTestConfig{
 		BrokerType:     "rabbitmq",
-		SetupSleep:     500 * time.Millisecond,
+		SetupSleep:     3 * time.Second,
 		ReceiveTimeout: 10 * time.Second,
 	})
 }

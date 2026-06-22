@@ -3,6 +3,7 @@ package broker
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -45,6 +46,9 @@ type googlePubSubConfig struct {
 	// Behavior flags (default: false - don't auto-create infrastructure)
 	CreateTopicIfMissing        bool `mapstructure:"create_topic_if_missing"`
 	CreateSubscriptionIfMissing bool `mapstructure:"create_subscription_if_missing"`
+
+	// Labels to apply to subscriptions at creation time (key-value pairs)
+	SubscriptionLabels map[string]string `mapstructure:"subscription_labels"`
 }
 
 // parseGoogleCloudDuration parses a Google Cloud duration string (e.g., "604800s", "10m", "1h")
@@ -217,6 +221,11 @@ func newGooglePubSubSubscriber(cfg *config, logger watermill.LoggerAdapter, subs
 			EnableMessageOrdering: gps.EnableMessageOrdering,
 		}
 
+		// Set Labels (applied only at subscription creation time)
+		if len(gps.SubscriptionLabels) > 0 {
+			sub.Labels = gps.SubscriptionLabels
+		}
+
 		// Set AckDeadlineSeconds (10-600 seconds)
 		if gps.AckDeadlineSeconds > 0 {
 			sub.AckDeadlineSeconds = int32(gps.AckDeadlineSeconds)
@@ -386,6 +395,22 @@ func validateGooglePubSubConfig(cfg *config) error {
 	// Validate NumGoroutines (must be non-negative if provided)
 	if gps.NumGoroutines < 0 {
 		return fmt.Errorf("googlepubsub.num_goroutines must be non-negative")
+	}
+
+	// Validate SubscriptionLabels against GCP label requirements:
+	// https://docs.cloud.google.com/resource-manager/docs/labels-overview
+	if len(gps.SubscriptionLabels) > 64 {
+		return fmt.Errorf("googlepubsub.subscription_labels must not exceed 64 entries")
+	}
+	labelKeyRe := regexp.MustCompile(`^\p{Ll}[\p{Ll}0-9_-]{0,62}$`)
+	labelValRe := regexp.MustCompile(`^[\p{Ll}0-9_-]{0,63}$`)
+	for k, v := range gps.SubscriptionLabels {
+		if !labelKeyRe.MatchString(k) {
+			return fmt.Errorf("googlepubsub.subscription_labels: invalid key %q (must be 1–63 chars, start with a lowercase letter, contain only lowercase letters/digits/underscores/dashes)", k)
+		}
+		if !labelValRe.MatchString(v) {
+			return fmt.Errorf("googlepubsub.subscription_labels: invalid value %q for key %q (must be 0–63 chars, contain only lowercase letters/digits/underscores/dashes)", v, k)
+		}
 	}
 
 	return nil

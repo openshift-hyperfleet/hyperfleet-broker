@@ -108,7 +108,7 @@ func TestSharedSubscription(t *testing.T) {
 
 	common.RunSharedSubscription(t, configMap, common.BrokerTestConfig{
 		BrokerType:     "googlepubsub",
-		SetupSleep:     2 * time.Second,
+		SetupSleep:     5 * time.Second,
 		ReceiveTimeout: 15 * time.Second,
 	})
 }

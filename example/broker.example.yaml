@@ -70,6 +70,14 @@ broker:
     create_topic_if_missing: false
     create_subscription_if_missing: false
 
+    # Labels to apply to subscriptions at creation time (key: value pairs)
+    # Applied only when the subscription is created (create_subscription_if_missing: true)
+    # Label keys and values must follow [GCP label rules](https://docs.cloud.google.com/resource-manager/docs/labels-overview)
+    # subscription_labels:
+    #   app: my-service
+    #   env: production
+    #   team: hyperfleet
+
 # Subscriber Configuration
 subscriber:
   # Number of parallel workers for processing messages

@@ -1,8 +1,10 @@
 package broker
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -574,6 +576,126 @@ func TestGooglePubSubConfigValidation(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 				require.NotNil(t, cfg)
+			}
+		})
+	}
+}
+
+func TestGooglePubSubSubscriptionLabelsValidation(t *testing.T) {
+	baseConfig := func() *config {
+		return &config{
+			Broker: brokerConfig{
+				Type: "googlepubsub",
+				GooglePubSub: googlePubSubConfig{
+					ProjectID: "test-project",
+				},
+			},
+		}
+	}
+
+	tooManyLabels := make(map[string]string, 65)
+	for i := range 65 {
+		tooManyLabels[fmt.Sprintf("key%d", i)] = "val"
+	}
+
+	tests := []struct {
+		name        string
+		labels      map[string]string
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name:        "nil labels",
+			labels:      nil,
+			expectError: false,
+		},
+		{
+			name:        "empty labels map",
+			labels:      map[string]string{},
+			expectError: false,
+		},
+		{
+			name:        "valid labels",
+			labels:      map[string]string{"env": "prod", "team": "platform-1"},
+			expectError: false,
+		},
+		{
+			name:        "valid label with empty value",
+			labels:      map[string]string{"env": ""},
+			expectError: false,
+		},
+		{
+			name:        "valid label key at max length",
+			labels:      map[string]string{strings.Repeat("a", 63): "val"},
+			expectError: false,
+		},
+		{
+			name:        "valid label value at max length",
+			labels:      map[string]string{"key": strings.Repeat("a", 63)},
+			expectError: false,
+		},
+		{
+			name:        "too many labels",
+			labels:      tooManyLabels,
+			expectError: true,
+			errorMsg:    "must not exceed 64 entries",
+		},
+		{
+			name:        "key with uppercase letter",
+			labels:      map[string]string{"Env": "prod"},
+			expectError: true,
+			errorMsg:    "invalid key",
+		},
+		{
+			name:        "key starting with digit",
+			labels:      map[string]string{"1env": "prod"},
+			expectError: true,
+			errorMsg:    "invalid key",
+		},
+		{
+			name:        "key starting with underscore",
+			labels:      map[string]string{"_env": "prod"},
+			expectError: true,
+			errorMsg:    "invalid key",
+		},
+		{
+			name:        "key starting with dash",
+			labels:      map[string]string{"-env": "prod"},
+			expectError: true,
+			errorMsg:    "invalid key",
+		},
+		{
+			name:        "key too long",
+			labels:      map[string]string{strings.Repeat("a", 64): "val"},
+			expectError: true,
+			errorMsg:    "invalid key",
+		},
+		{
+			name:        "value with uppercase letter",
+			labels:      map[string]string{"env": "Prod"},
+			expectError: true,
+			errorMsg:    "invalid value",
+		},
+		{
+			name:        "value too long",
+			labels:      map[string]string{"env": strings.Repeat("a", 64)},
+			expectError: true,
+			errorMsg:    "invalid value",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := baseConfig()
+			cfg.Broker.GooglePubSub.SubscriptionLabels = tt.labels
+			err := validateGooglePubSubConfig(cfg)
+			if tt.expectError {
+				assert.Error(t, err)
+				if tt.errorMsg != "" {
+					assert.Contains(t, err.Error(), tt.errorMsg)
+				}
+			} else {
+				assert.NoError(t, err)
 			}
 		})
 	}
