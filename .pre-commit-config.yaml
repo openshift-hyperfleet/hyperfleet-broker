@@ -1,0 +1,11 @@
+default_install_hook_types: [pre-commit, commit-msg]
+
+repos:
+  - repo: https://github.com/openshift-hyperfleet/hyperfleet-hooks
+    rev: 7f5119208e5cdee3f0c688881b6a4b803095f203 # v0.2.1
+    hooks:
+      - id: hyperfleet-commitlint
+        stages: [commit-msg]
+      - id: hyperfleet-gofmt
+      - id: hyperfleet-golangci-lint
+      - id: hyperfleet-go-vet
