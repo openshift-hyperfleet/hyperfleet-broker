@@ -1,6 +1,6 @@
 include .bingo/Variables.mk
 
-.PHONY: test test-integration test-all lint fmt
+.PHONY: test test-integration test-all lint fmt gofmt go-vet install-hooks
 
 # Run linter
 lint: $(GOLANGCI_LINT)
@@ -9,6 +9,17 @@ lint: $(GOLANGCI_LINT)
 # Format code
 fmt:
 	gofmt -s -w .
+
+# Alias for fmt (required by hyperfleet-hooks)
+gofmt: fmt
+
+# Run go vet (required by hyperfleet-hooks)
+go-vet:
+	go vet ./...
+
+# Install pre-commit hooks
+install-hooks:
+	pre-commit install
 
 # Run unit tests
 test:

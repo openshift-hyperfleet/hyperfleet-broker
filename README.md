@@ -645,6 +645,21 @@ These files are mounted into the containers and used by the publisher and subscr
 
 ## Development
 
+### Prerequisites
+
+- Go 1.25 or later
+- Docker or Podman
+- Make
+- [pre-commit](https://pre-commit.com/)
+
+### Install Git Hooks
+
+```bash
+make install-hooks
+```
+
+This installs pre-commit hooks configured in `.pre-commit-config.yaml` for commit message and code quality validation on every commit.
+
 ### Tool Dependency Management (Bingo)
 
 HyperFleet Broker uses [bingo](https://github.com/bwplotka/bingo) to manage Go tool dependencies with pinned versions.
