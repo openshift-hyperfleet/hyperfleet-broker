@@ -521,6 +521,57 @@ func TestGooglePubSubConfigValidation(t *testing.T) {
 			expectError: false,
 		},
 		{
+			name: "expiration_ttl less than message_retention_duration",
+			configMap: map[string]string{
+				"broker.type":                                    "googlepubsub",
+				"broker.googlepubsub.project_id":                 "test-project",
+				"broker.googlepubsub.message_retention_duration": "2d",
+				"broker.googlepubsub.expiration_ttl":             "1d",
+			},
+			expectError: true,
+			errorMsg:    "expiration_ttl must be greater than or equal to message_retention_duration",
+		},
+		{
+			name: "expiration_ttl negative is invalid",
+			configMap: map[string]string{
+				"broker.type":                        "googlepubsub",
+				"broker.googlepubsub.project_id":     "test-project",
+				"broker.googlepubsub.expiration_ttl": "-1d",
+			},
+			expectError: true,
+			errorMsg:    "googlepubsub.expiration_ttl must be at least 1d or 0 (never expire)",
+		},
+		{
+			name: "message_retention_duration negative is invalid",
+			configMap: map[string]string{
+				"broker.type":                                    "googlepubsub",
+				"broker.googlepubsub.project_id":                 "test-project",
+				"broker.googlepubsub.message_retention_duration": "-1d",
+			},
+			expectError: true,
+			errorMsg:    "googlepubsub.message_retention_duration must be between 10m and 31d",
+		},
+		{
+			name: "expiration_ttl greater than message_retention_duration",
+			configMap: map[string]string{
+				"broker.type":                                    "googlepubsub",
+				"broker.googlepubsub.project_id":                 "test-project",
+				"broker.googlepubsub.message_retention_duration": "1h",
+				"broker.googlepubsub.expiration_ttl":             "1d",
+			},
+			expectError: false,
+		},
+		{
+			name: "expiration_ttl equal to 0 and message_retention_duration is 1d",
+			configMap: map[string]string{
+				"broker.type":                                    "googlepubsub",
+				"broker.googlepubsub.project_id":                 "test-project",
+				"broker.googlepubsub.message_retention_duration": "1d",
+				"broker.googlepubsub.expiration_ttl":             "0",
+			},
+			expectError: false,
+		},
+		{
 			name: "retry_min_backoff greater than max",
 			configMap: map[string]string{
 				"broker.type":                           "googlepubsub",

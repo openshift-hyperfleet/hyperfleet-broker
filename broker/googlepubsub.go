@@ -294,28 +294,39 @@ func validateGooglePubSubConfig(cfg *config) error {
 	}
 
 	// Validate MessageRetentionDuration format if provided
+	var mrDuration time.Duration
+	var err error
 	if gps.MessageRetentionDuration != "" {
-		d, err := parseGoogleCloudDuration(gps.MessageRetentionDuration)
+		mrDuration, err = parseGoogleCloudDuration(gps.MessageRetentionDuration)
 		if err != nil {
 			return fmt.Errorf("googlepubsub.message_retention_duration: %w", err)
 		}
 		// Must be between 10 minutes and 31 days
 		minRetention := 10 * time.Minute
 		maxRetention := 31 * 24 * time.Hour
-		if d < minRetention || d > maxRetention {
+		if mrDuration < minRetention || mrDuration > maxRetention {
 			return fmt.Errorf("googlepubsub.message_retention_duration must be between 10m and 31d")
 		}
 	}
 
 	// Validate ExpirationTTL format if provided
+	var ttlDuration time.Duration
+	// if expiration_ttl is not provided - defaults to 31d
 	if gps.ExpirationTTL != "" {
-		d, err := parseGoogleCloudDuration(gps.ExpirationTTL)
+		ttlDuration, err = parseGoogleCloudDuration(gps.ExpirationTTL)
 		if err != nil {
 			return fmt.Errorf("googlepubsub.expiration_ttl: %w", err)
 		}
 		// Must be at least 1 day or 0 (never expire)
-		if d != 0 && d < 24*time.Hour {
+		// If expiration_ttl = 0 - it means never expire
+		if ttlDuration != 0 && ttlDuration < 24*time.Hour {
 			return fmt.Errorf("googlepubsub.expiration_ttl must be at least 1d or 0 (never expire)")
+		}
+
+		// If expiration_ttl != 0 and message_retention_duration != 0
+		// validate that expiration_ttl is greater than or equal to message_retention_duration
+		if ttlDuration != 0 && mrDuration != 0 && ttlDuration < mrDuration {
+			return fmt.Errorf("googlepubsub.expiration_ttl must be greater than or equal to message_retention_duration")
 		}
 	}
 

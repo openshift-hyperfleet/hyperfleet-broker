@@ -32,7 +32,7 @@ type publisher struct {
 	pub          message.Publisher
 	logger       logger.Logger // Caller's logger (always present - default logger if not provided)
 	healthCheck  healthCheckFunc
-	healthCloser io.Closer          // optional resource to close with publisher (e.g. Pub/Sub health check client)
+	healthCloser io.Closer // optional resource to close with publisher (e.g. Pub/Sub health check client)
 	metrics      *MetricsRecorder
 }
 

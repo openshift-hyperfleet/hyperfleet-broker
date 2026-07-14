@@ -44,9 +44,9 @@ type subscriber struct {
 	wg             sync.WaitGroup
 
 	// Routers and cancel functions for all subscriptions, used by Close() to ensure clean shutdown
-	routers     []*message.Router
-	cancelFns   []context.CancelFunc
-	routersMu   sync.Mutex
+	routers   []*message.Router
+	cancelFns []context.CancelFunc
+	routersMu sync.Mutex
 
 	// Error notification channel
 	errorChan chan *SubscriberError
