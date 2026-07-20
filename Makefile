@@ -1,5 +1,6 @@
+GO       := go
 TOOL_MOD := tools/go.mod
-gotool = go tool -modfile=$(TOOL_MOD) $(1)
+gotool = GOWORK=off "$(GO)" tool -modfile="$(TOOL_MOD)" $(1)
 
 .PHONY: test test-integration test-all lint fmt gofmt go-vet install-hooks tools verify-tools
 
@@ -9,11 +10,11 @@ lint: ## Run golangci-lint
 
 .PHONY: tools
 tools: ## Ensure tool dependencies are up to date
-	cd tools && GOWORK=off go mod tidy
+	cd tools && GOWORK=off "$(GO)" mod tidy
 
 .PHONY: verify-tools
 verify-tools: tools ## Fail in CI if tool module drifted
-	@git diff --exit-code tools/go.mod tools/go.sum || (echo "tool modules out of date; run 'make tools'" && exit 1)
+	@git diff --exit-code HEAD -- tools/go.mod tools/go.sum || (echo "tool modules out of date; run 'make tools'" && exit 1)
 
 # Format code
 fmt:
