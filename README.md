@@ -647,7 +647,7 @@ These files are mounted into the containers and used by the publisher and subscr
 
 ### Prerequisites
 
-- Go 1.25 or later
+- Go 1.26 or later
 - Docker or Podman
 - Make
 - [pre-commit](https://pre-commit.com/)
