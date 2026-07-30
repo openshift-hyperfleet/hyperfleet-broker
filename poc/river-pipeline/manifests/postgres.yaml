@@ -1,0 +1,64 @@
+# Standalone single-replica Postgres for the river broker POC.
+# emptyDir storage: queue state is lost on pod restart, which is acceptable
+# for the broker role (Sentinel republishes anything unreconciled on its
+# next poll). Use a real Postgres deployment for anything beyond a demo.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: river-postgres
+  labels:
+    app: river-postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: river-postgres
+  template:
+    metadata:
+      labels:
+        app: river-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: docker.io/library/postgres:16-alpine
+          env:
+            - name: POSTGRES_USER
+              value: broker
+            - name: POSTGRES_PASSWORD
+              value: broker
+            - name: POSTGRES_DB
+              value: broker
+          ports:
+            - name: pg
+              containerPort: 5432
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "broker"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: river-postgres
+  labels:
+    app: river-postgres
+spec:
+  selector:
+    app: river-postgres
+  ports:
+    - name: pg
+      port: 5432
+      targetPort: pg
