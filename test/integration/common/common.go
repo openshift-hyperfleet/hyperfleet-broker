@@ -75,20 +75,29 @@ type BrokerTestConfig struct {
 	PublishDelay    time.Duration                       // Delay between publishes (for gradual publishing, 0 = no delay)
 }
 
-// BuildConfigMap creates a configuration map for testing
-func BuildConfigMap(brokerType string, rabbitMQURL string, pubsubProjectID string) map[string]string {
+// BuildConfigMap creates a configuration map for testing. The url parameter
+// carries the backend connection string (AMQP URL for rabbitmq, Postgres DSN
+// for river); pubsubProjectID applies to googlepubsub only.
+func BuildConfigMap(brokerType string, url string, pubsubProjectID string) map[string]string {
 	configMap := map[string]string{
 		"broker.type":            brokerType,
 		"subscriber.parallelism": "1",
 	}
 	switch brokerType {
 	case "rabbitmq":
-		configMap["broker.rabbitmq.url"] = rabbitMQURL
+		configMap["broker.rabbitmq.url"] = url
 	case "googlepubsub":
 		configMap["broker.googlepubsub.project_id"] = pubsubProjectID
 		// Enable auto-creation of topics and subscriptions for tests
 		configMap["broker.googlepubsub.create_topic_if_missing"] = "true"
 		configMap["broker.googlepubsub.create_subscription_if_missing"] = "true"
+	case "river":
+		configMap["broker.river.dsn"] = url
+		configMap["broker.river.create_schema_if_missing"] = "true"
+		// Test-tuned redelivery: short fixed backoff and a high attempt
+		// ceiling so redistribution scenarios converge within test timeouts.
+		configMap["broker.river.retry_backoff"] = "200ms"
+		configMap["broker.river.max_attempts"] = "50"
 	}
 	return configMap
 }

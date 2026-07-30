@@ -90,6 +90,9 @@ func NewPublisher(log logger.Logger, metrics *MetricsRecorder, configMap ...map[
 		}
 		hc = newGooglePubSubHealthCheck(healthClient, cfg.Broker.GooglePubSub.ProjectID)
 		healthCloser = healthClient
+	case "river":
+		// The River backend implements Publisher natively (no Watermill).
+		return newRiverPublisher(cfg, log, metrics)
 	default:
 		return nil, fmt.Errorf("unsupported broker type: %s", cfg.Broker.Type)
 	}
@@ -159,6 +162,9 @@ func NewSubscriber(log logger.Logger, subscriptionID string, metrics *MetricsRec
 		if err != nil {
 			return nil, fmt.Errorf("failed to create Google Pub/Sub subscriber: %w", err)
 		}
+	case "river":
+		// The River backend implements Subscriber natively (no Watermill).
+		return newRiverSubscriber(cfg, log, subscriptionID, metrics)
 	default:
 		return nil, fmt.Errorf("unsupported broker type: %s", cfg.Broker.Type)
 	}
@@ -184,6 +190,9 @@ func logConfiguration(cfg *config, component string, logger watermill.LoggerAdap
 	logCfg := *cfg
 	if cfg.Broker.Type == "rabbitmq" && cfg.Broker.RabbitMQ.URL != "" {
 		logCfg.Broker.RabbitMQ.URL = maskPassword(cfg.Broker.RabbitMQ.URL)
+	}
+	if cfg.Broker.Type == "river" && cfg.Broker.River.DSN != "" {
+		logCfg.Broker.River.DSN = maskPassword(cfg.Broker.River.DSN)
 	}
 
 	// Marshal to JSON with indentation

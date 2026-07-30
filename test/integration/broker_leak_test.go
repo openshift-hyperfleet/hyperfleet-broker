@@ -27,6 +27,7 @@ import (
 var (
 	sharedRabbitMQURL     string
 	sharedPubSubProjectID string
+	sharedRiverDSN        string
 )
 
 // TestMain sets up the test environment, creates shared RabbitMQ and PubSub containers,
@@ -106,6 +107,48 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
+	// Start Postgres container for the river backend
+	postgresReq := testcontainers.ContainerRequest{
+		Image:        "postgres:16-alpine",
+		ExposedPorts: []string{"5432/tcp"},
+		Env: map[string]string{
+			"POSTGRES_USER":     "broker",
+			"POSTGRES_PASSWORD": "broker",
+			"POSTGRES_DB":       "broker",
+		},
+		WaitingFor: wait.ForLog("database system is ready to accept connections").
+			WithOccurrence(2).
+			WithStartupTimeout(60 * time.Second),
+	}
+	postgresContainer, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+		ContainerRequest: postgresReq,
+		Started:          true,
+	})
+	if err != nil {
+		_ = rabbitmqContainer.Terminate(ctx)
+		_ = pubsubContainer.Terminate(ctx)
+		fmt.Fprintf(os.Stderr, "failed to start postgres container: %v\n", err)
+		os.Exit(1)
+	}
+
+	pgHost, err := postgresContainer.Host(ctx)
+	if err != nil {
+		_ = rabbitmqContainer.Terminate(ctx)
+		_ = pubsubContainer.Terminate(ctx)
+		_ = postgresContainer.Terminate(ctx)
+		fmt.Fprintf(os.Stderr, "failed to get postgres container host: %v\n", err)
+		os.Exit(1)
+	}
+	pgPort, err := postgresContainer.MappedPort(ctx, "5432")
+	if err != nil {
+		_ = rabbitmqContainer.Terminate(ctx)
+		_ = pubsubContainer.Terminate(ctx)
+		_ = postgresContainer.Terminate(ctx)
+		fmt.Fprintf(os.Stderr, "failed to get postgres container mapped port: %v\n", err)
+		os.Exit(1)
+	}
+	sharedRiverDSN = fmt.Sprintf("postgres://broker:broker@%s:%s/broker?sslmode=disable", pgHost, pgPort.Port())
+
 	code := m.Run()
 
 	_ = os.Unsetenv("PUBSUB_EMULATOR_HOST")
@@ -114,6 +157,9 @@ func TestMain(m *testing.M) {
 	}
 	if err := pubsubContainer.Terminate(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to terminate pubsub container: %v\n", err)
+	}
+	if err := postgresContainer.Terminate(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to terminate postgres container: %v\n", err)
 	}
 
 	os.Exit(code)
@@ -140,6 +186,8 @@ func setupBrokerTest(t *testing.T, cfg brokerTestConfig) map[string]string {
 		configMap = common.BuildConfigMap("rabbitmq", sharedRabbitMQURL, "")
 	case "googlepubsub":
 		configMap = common.BuildConfigMap("googlepubsub", "", sharedPubSubProjectID)
+	case "river":
+		configMap = common.BuildConfigMap("river", sharedRiverDSN, "")
 	default:
 		t.Fatalf("unsupported broker type: %s", cfg.brokerType)
 	}
@@ -321,6 +369,28 @@ func testLeakIncreasesWithUsage(t *testing.T, cfg brokerTestConfig) {
 	}
 
 	t.Log("")
+}
+
+// TestRiverGoroutineLeak tests goroutine leak with the River backend
+func TestRiverGoroutineLeak(t *testing.T) {
+	testGoroutineLeak(t, brokerTestConfig{
+		brokerType:     "river",
+		setupSleep:     500 * time.Millisecond,
+		receiveTimeout: 10 * time.Second,
+		// pgx pool health-check goroutines and River's elector take a moment
+		// to wind down after Stop(); allow a small tolerance.
+		leakTolerance: 4,
+	})
+}
+
+// TestRiverLeakIncreasesWithUsage verifies goroutine cleanup scales with subscription count using River
+func TestRiverLeakIncreasesWithUsage(t *testing.T) {
+	testLeakIncreasesWithUsage(t, brokerTestConfig{
+		brokerType:     "river",
+		setupSleep:     500 * time.Millisecond,
+		receiveTimeout: 10 * time.Second,
+		leakTolerance:  4,
+	})
 }
 
 // TestRabbitMQLeakIncreasesWithUsage verifies goroutine cleanup scales with subscription count using RabbitMQ

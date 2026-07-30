@@ -21,6 +21,7 @@ type brokerConfig struct {
 	Type         string             `mapstructure:"type"`
 	RabbitMQ     rabbitMQConfig     `mapstructure:"rabbitmq"`
 	GooglePubSub googlePubSubConfig `mapstructure:"googlepubsub"`
+	River        riverConfig        `mapstructure:"river"`
 }
 
 // subscriberConfig holds subscriber-specific configuration
@@ -138,6 +139,8 @@ func validateConfig(cfg *config) error {
 		return validateRabbitMQConfig(cfg)
 	case "googlepubsub":
 		return validateGooglePubSubConfig(cfg)
+	case "river":
+		return validateRiverConfig(cfg)
 	default:
 		return fmt.Errorf("unsupported broker type: %s", cfg.Broker.Type)
 	}
