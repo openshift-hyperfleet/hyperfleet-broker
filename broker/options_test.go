@@ -3,7 +3,6 @@ package broker
 import (
 	"testing"
 
-	"github.com/openshift-hyperfleet/hyperfleet-broker/pkg/logger"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 )
@@ -27,8 +26,7 @@ func TestNewPublisherValidation(t *testing.T) {
 	})
 
 	t.Run("publisher with nil metrics returns error", func(t *testing.T) {
-		mockLogger := logger.NewMockLogger()
-		pub, err := NewPublisher(mockLogger, nil, configMap)
+		pub, err := NewPublisher(discardLogger, nil, configMap)
 		assert.Error(t, err)
 		assert.Nil(t, pub)
 		assert.Contains(t, err.Error(), "metrics is required")
@@ -51,18 +49,16 @@ func TestNewSubscriberValidation(t *testing.T) {
 	})
 
 	t.Run("subscriber with empty subscription ID returns error", func(t *testing.T) {
-		mockLogger := logger.NewMockLogger()
 		reg := prometheus.NewRegistry()
 		metrics := NewMetricsRecorder("test", "v0.1.0", reg)
-		sub, err := NewSubscriber(mockLogger, "", metrics, configMap)
+		sub, err := NewSubscriber(discardLogger, "", metrics, configMap)
 		assert.Error(t, err)
 		assert.Nil(t, sub)
 		assert.Contains(t, err.Error(), "subscriptionID is required")
 	})
 
 	t.Run("subscriber with nil metrics returns error", func(t *testing.T) {
-		mockLogger := logger.NewMockLogger()
-		sub, err := NewSubscriber(mockLogger, "test-sub", nil, configMap)
+		sub, err := NewSubscriber(discardLogger, "test-sub", nil, configMap)
 		assert.Error(t, err)
 		assert.Nil(t, sub)
 		assert.Contains(t, err.Error(), "metrics is required")

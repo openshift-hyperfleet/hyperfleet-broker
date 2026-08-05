@@ -5,12 +5,13 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"log/slog"
 	"time"
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/cloudevents/sdk-go/v2/event"
 	"github.com/openshift-hyperfleet/hyperfleet-broker/broker"
-	"github.com/openshift-hyperfleet/hyperfleet-broker/pkg/logger"
+	hfl "github.com/openshift-hyperfleet/hyperfleet-logger"
 )
 
 func createEvent(id string, message string) event.Event {
@@ -34,8 +35,8 @@ func main() {
 	message := flag.String("message", "", "Send a single message with this content and exit")
 	flag.Parse()
 
-	// Create logger, metrics, and publisher
-	appLogger := logger.NewTestLogger()
+	// Create logger using the shared HyperFleet handler, metrics, and publisher
+	appLogger := slog.New(hfl.NewHandler("example-publisher", "v0.0.0"))
 	metrics := broker.NewMetricsRecorder("example-publisher", "v0.0.0", nil)
 	publisher, err := broker.NewPublisher(appLogger, metrics)
 	if err != nil {

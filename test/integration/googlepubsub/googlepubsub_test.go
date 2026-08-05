@@ -3,7 +3,6 @@ package googlepubsub_test
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"os"
 	"testing"
 	"time"
@@ -12,7 +11,6 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/openshift-hyperfleet/hyperfleet-broker/broker"
-	"github.com/openshift-hyperfleet/hyperfleet-broker/pkg/logger"
 	"github.com/openshift-hyperfleet/hyperfleet-broker/test/integration/common"
 	"github.com/stretchr/testify/require"
 )
@@ -137,11 +135,11 @@ func TestSlowSubscriber(t *testing.T) {
 	// but with different num_goroutines to simulate fast vs slow
 	subscriptionID := fmt.Sprintf("slow-subscription-%d", time.Now().UnixNano())
 	configMap["broker.googlepubsub.num_goroutines"] = "5"
-	sub1, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), subscriptionID, common.NewTestMetrics(t), configMap)
+	sub1, err := broker.NewSubscriber(common.NewTestLogger(), subscriptionID, common.NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 
 	configMap["broker.googlepubsub.num_goroutines"] = "1"
-	sub2, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), subscriptionID, common.NewTestMetrics(t), configMap)
+	sub2, err := broker.NewSubscriber(common.NewTestLogger(), subscriptionID, common.NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 
 	common.RunSlowSubscriber(t, configMap, common.BrokerTestConfig{

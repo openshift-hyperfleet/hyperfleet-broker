@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 
 	"github.com/ThreeDotsLabs/watermill/message"
 	"github.com/cloudevents/sdk-go/v2/event"
-	"github.com/openshift-hyperfleet/hyperfleet-broker/pkg/logger"
 )
 
 // Publisher defines the interface for publishing CloudEvents
@@ -32,7 +32,7 @@ type healthCheckFunc func(ctx context.Context) error
 // publisher wraps a Watermill publisher and provides a simplified interface
 type publisher struct {
 	pub          message.Publisher
-	logger       logger.Logger // Caller's logger (always present - default logger if not provided)
+	logger       *slog.Logger
 	healthCheck  healthCheckFunc
 	healthCloser io.Closer // optional resource to close with publisher (e.g. Pub/Sub health check client)
 	metrics      *MetricsRecorder
@@ -41,13 +41,12 @@ type publisher struct {
 
 // Publish publishes a CloudEvent to the specified topic with context
 func (p *publisher) Publish(ctx context.Context, topic string, event *event.Event) error {
-	// Log the publish operation - logger is guaranteed non-nil
-	p.logger.Infof(ctx, "Publishing event %s to topic %s", event.ID(), topic)
+	p.logger.InfoContext(ctx, "publishing event", "event_id", event.ID(), "topic", topic)
 
 	// Convert CloudEvent to Watermill message
 	msg, err := eventToMessage(event)
 	if err != nil {
-		p.logger.Errorf(ctx, "Failed to convert CloudEvent to message: %v", err)
+		p.logger.ErrorContext(ctx, "failed to convert CloudEvent to message", "error", err)
 		p.metrics.RecordError(topic, "conversion")
 		return err
 	}
@@ -55,13 +54,13 @@ func (p *publisher) Publish(ctx context.Context, topic string, event *event.Even
 	// Publish the message
 	err = p.pub.Publish(topic, msg)
 	if err != nil {
-		p.logger.Errorf(ctx, "Failed to publish message to topic: %v", err)
+		p.logger.ErrorContext(ctx, "failed to publish message to topic", "error", err)
 		p.metrics.RecordError(topic, "publish")
 		return err
 	}
 
 	p.metrics.RecordPublished(topic)
-	p.logger.Debugf(ctx, "Successfully published event %s to topic %s", event.ID(), topic)
+	p.logger.DebugContext(ctx, "successfully published event", "event_id", event.ID(), "topic", topic)
 	return nil
 }
 
@@ -82,16 +81,16 @@ func (p *publisher) BrokerType() string {
 
 // Close closes the underlying publisher and any health check resources.
 func (p *publisher) Close() error {
-	p.logger.Info(context.Background(), "Closing publisher")
+	p.logger.InfoContext(context.Background(), "closing publisher")
 
 	err := p.pub.Close()
 	if err != nil {
-		p.logger.Errorf(context.Background(), "Failed to close publisher: %v", err)
+		p.logger.ErrorContext(context.Background(), "failed to close publisher", "error", err)
 	}
 
 	if p.healthCloser != nil {
 		if closeErr := p.healthCloser.Close(); closeErr != nil {
-			p.logger.Errorf(context.Background(), "Failed to close health check client: %v", closeErr)
+			p.logger.ErrorContext(context.Background(), "failed to close health check client", "error", closeErr)
 			if err == nil {
 				err = closeErr
 			}

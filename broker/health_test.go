@@ -6,16 +6,13 @@ import (
 	"testing"
 
 	"github.com/ThreeDotsLabs/watermill/message"
-	"github.com/openshift-hyperfleet/hyperfleet-broker/pkg/logger"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestPublisherHealthWithCustomHealthCheck(t *testing.T) {
-	mockLogger := logger.NewMockLogger()
-
 	t.Run("healthy publisher returns nil", func(t *testing.T) {
 		p := &publisher{
-			logger: mockLogger,
+			logger: discardLogger,
 			healthCheck: func(_ context.Context) error {
 				return nil
 			},
@@ -26,7 +23,7 @@ func TestPublisherHealthWithCustomHealthCheck(t *testing.T) {
 
 	t.Run("unhealthy publisher returns error", func(t *testing.T) {
 		p := &publisher{
-			logger: mockLogger,
+			logger: discardLogger,
 			healthCheck: func(_ context.Context) error {
 				return fmt.Errorf("connection lost")
 			},

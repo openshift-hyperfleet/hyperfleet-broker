@@ -1,10 +1,11 @@
 module github.com/openshift-hyperfleet/hyperfleet-broker-example
 
-go 1.25.0
+go 1.26.0
 
 require (
 	github.com/cloudevents/sdk-go/v2 v2.16.2
 	github.com/openshift-hyperfleet/hyperfleet-broker v0.0.0
+	github.com/openshift-hyperfleet/hyperfleet-logger v0.0.0-20260805124353-c3cad8717e20
 )
 
 require (

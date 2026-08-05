@@ -33,7 +33,7 @@ install-hooks:
 
 # Run unit tests
 test:
-	go test -v ./broker/... ./pkg/... -timeout 10m
+	go test -v ./broker/... -timeout 10m
 
 # Run tests in the test folder (sequential packages: CI has 1 CPU so parallel execution causes timeouts)
 test-integration:

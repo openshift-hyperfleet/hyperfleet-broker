@@ -12,11 +12,15 @@ import (
 
 	"github.com/cloudevents/sdk-go/v2/event"
 	"github.com/openshift-hyperfleet/hyperfleet-broker/broker"
-	"github.com/openshift-hyperfleet/hyperfleet-broker/pkg/logger"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// NewTestLogger returns a *slog.Logger for integration tests.
+func NewTestLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelWarn}))
+}
 
 // NewTestMetrics creates a MetricsRecorder with an isolated registry for testing.
 func NewTestMetrics(t *testing.T) *broker.MetricsRecorder {
@@ -99,7 +103,7 @@ func RunPublisherSubscriber(t *testing.T, configMap map[string]string, cfg Broke
 	topic := fmt.Sprintf("test-topic-%d", id)
 	ctx := context.Background()
 	// Create publisher
-	pub, err := broker.NewPublisher(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), NewTestMetrics(t), configMap)
+	pub, err := broker.NewPublisher(NewTestLogger(), NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
 		if err := pub.Close(); err != nil {
@@ -108,7 +112,7 @@ func RunPublisherSubscriber(t *testing.T, configMap map[string]string, cfg Broke
 	}()
 	// Create subscriber
 	subscriptionID := fmt.Sprintf("test-subscription-%d", id)
-	sub, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), subscriptionID, NewTestMetrics(t), configMap)
+	sub, err := broker.NewSubscriber(NewTestLogger(), subscriptionID, NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
 		if err := sub.Close(); err != nil {
@@ -154,7 +158,7 @@ func RunMultipleEvents(t *testing.T, configMap map[string]string, cfg BrokerTest
 	id := uniqueSuffix()
 	topic := fmt.Sprintf("routing-topic-%d", id)
 	ctx := context.Background()
-	pub, err := broker.NewPublisher(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), NewTestMetrics(t), configMap)
+	pub, err := broker.NewPublisher(NewTestLogger(), NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
 		if err := pub.Close(); err != nil {
@@ -162,7 +166,7 @@ func RunMultipleEvents(t *testing.T, configMap map[string]string, cfg BrokerTest
 		}
 	}()
 	subscriptionID := fmt.Sprintf("test-subscription-%d", id)
-	sub, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), subscriptionID, NewTestMetrics(t), configMap)
+	sub, err := broker.NewSubscriber(NewTestLogger(), subscriptionID, NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
 		if err := sub.Close(); err != nil {
@@ -218,7 +222,7 @@ func RunSharedSubscription(t *testing.T, configMap map[string]string, cfg Broker
 	id := uniqueSuffix()
 	topic := fmt.Sprintf("shared-topic-%d", id)
 	ctx := context.Background()
-	pub, err := broker.NewPublisher(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), NewTestMetrics(t), configMap)
+	pub, err := broker.NewPublisher(NewTestLogger(), NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
 		if err := pub.Close(); err != nil {
@@ -228,14 +232,14 @@ func RunSharedSubscription(t *testing.T, configMap map[string]string, cfg Broker
 	// Create two subscribers with the same subscriptionID
 	// They should share messages (load balancing)
 	subscriptionID := fmt.Sprintf("shared-subscription-%d", id)
-	sub1, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), subscriptionID, NewTestMetrics(t), configMap)
+	sub1, err := broker.NewSubscriber(NewTestLogger(), subscriptionID, NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
 		if err := sub1.Close(); err != nil {
 			t.Logf("failed to close subscriber 1: %v", err)
 		}
 	}()
-	sub2, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), subscriptionID, NewTestMetrics(t), configMap)
+	sub2, err := broker.NewSubscriber(NewTestLogger(), subscriptionID, NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
 		if err := sub2.Close(); err != nil {
@@ -305,7 +309,7 @@ func RunFanoutSubscription(t *testing.T, configMap map[string]string, cfg Broker
 	id := uniqueSuffix()
 	topic := fmt.Sprintf("fanout-topic-%d", id)
 	ctx := context.Background()
-	pub, err := broker.NewPublisher(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), NewTestMetrics(t), configMap)
+	pub, err := broker.NewPublisher(NewTestLogger(), NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
 		if err := pub.Close(); err != nil {
@@ -314,14 +318,14 @@ func RunFanoutSubscription(t *testing.T, configMap map[string]string, cfg Broker
 	}()
 	// Create two subscribers with different subscriptionIDs
 	// Each should receive all messages (fanout behavior)
-	sub1, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), fmt.Sprintf("fanout-sub-1-%d", id), NewTestMetrics(t), configMap)
+	sub1, err := broker.NewSubscriber(NewTestLogger(), fmt.Sprintf("fanout-sub-1-%d", id), NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
 		if err := sub1.Close(); err != nil {
 			t.Logf("failed to close subscriber 1: %v", err)
 		}
 	}()
-	sub2, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), fmt.Sprintf("fanout-sub-2-%d", id), NewTestMetrics(t), configMap)
+	sub2, err := broker.NewSubscriber(NewTestLogger(), fmt.Sprintf("fanout-sub-2-%d", id), NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
 		if err := sub2.Close(); err != nil {
@@ -396,7 +400,7 @@ func RunFanoutSubscription(t *testing.T, configMap map[string]string, cfg Broker
 func RunSlowSubscriber(t *testing.T, configMap map[string]string, cfg BrokerTestConfig, sub1, sub2 broker.Subscriber) {
 	topic := uniqueTopic("slow-topic")
 	ctx := context.Background()
-	pub, err := broker.NewPublisher(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), NewTestMetrics(t), configMap)
+	pub, err := broker.NewPublisher(NewTestLogger(), NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
 		if err := pub.Close(); err != nil {
@@ -484,7 +488,7 @@ func RunSlowSubscriber(t *testing.T, configMap map[string]string, cfg BrokerTest
 func RunErrorSubscriber(t *testing.T, configMap map[string]string, cfg BrokerTestConfig) {
 	topic := uniqueTopic("error-topic")
 	ctx := context.Background()
-	pub, err := broker.NewPublisher(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), NewTestMetrics(t), configMap)
+	pub, err := broker.NewPublisher(NewTestLogger(), NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
 		if err := pub.Close(); err != nil {
@@ -493,14 +497,14 @@ func RunErrorSubscriber(t *testing.T, configMap map[string]string, cfg BrokerTes
 	}()
 	// Create two subscribers with the same subscriptionID (shared subscription)
 	subscriptionID := fmt.Sprintf("error-subscription-%d", uniqueSuffix())
-	sub1, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), subscriptionID, NewTestMetrics(t), configMap)
+	sub1, err := broker.NewSubscriber(NewTestLogger(), subscriptionID, NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
 		if err := sub1.Close(); err != nil {
 			t.Logf("failed to close subscriber 1: %v", err)
 		}
 	}()
-	sub2, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), subscriptionID, NewTestMetrics(t), configMap)
+	sub2, err := broker.NewSubscriber(NewTestLogger(), subscriptionID, NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
 		if err := sub2.Close(); err != nil {
@@ -563,7 +567,7 @@ func RunCloseWaitsForInFlightMessages(t *testing.T, configMap map[string]string,
 	if cfg.BrokerType == "rabbitmq" {
 		configMap["subscriber.parallelism"] = "6"
 	}
-	pub, err := broker.NewPublisher(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), NewTestMetrics(t), configMap)
+	pub, err := broker.NewPublisher(NewTestLogger(), NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
 		if err := pub.Close(); err != nil {
@@ -571,7 +575,7 @@ func RunCloseWaitsForInFlightMessages(t *testing.T, configMap map[string]string,
 		}
 	}()
 	subscriptionID := fmt.Sprintf("close-test-sub-%d", uniqueSuffix())
-	sub, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), subscriptionID, NewTestMetrics(t), configMap)
+	sub, err := broker.NewSubscriber(NewTestLogger(), subscriptionID, NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	// Publish 5 messages
 	numMessages := 5
@@ -648,7 +652,7 @@ func RunPanicHandler(t *testing.T, configMap map[string]string, cfg BrokerTestCo
 	if cfg.BrokerType == "rabbitmq" {
 		configMap["subscriber.parallelism"] = "3"
 	}
-	pub, err := broker.NewPublisher(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), NewTestMetrics(t), configMap)
+	pub, err := broker.NewPublisher(NewTestLogger(), NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
 		if err := pub.Close(); err != nil {
@@ -656,7 +660,7 @@ func RunPanicHandler(t *testing.T, configMap map[string]string, cfg BrokerTestCo
 		}
 	}()
 	subscriptionID := fmt.Sprintf("panic-test-sub-%d", uniqueSuffix())
-	sub, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), subscriptionID, NewTestMetrics(t), configMap)
+	sub, err := broker.NewSubscriber(NewTestLogger(), subscriptionID, NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	// Track how many times the handler was called (before panic)
 	var handlerCallCount int64
@@ -726,7 +730,7 @@ func RunErrorChannelNotification(t *testing.T, configMap map[string]string, cfg 
 	ctx := context.Background()
 	// Create subscriber
 	subscriptionID := fmt.Sprintf("error-channel-test-%d", uniqueSuffix())
-	sub, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), subscriptionID, NewTestMetrics(t), configMap)
+	sub, err := broker.NewSubscriber(NewTestLogger(), subscriptionID, NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
 		if err := sub.Close(); err != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -11,7 +12,7 @@ import (
 
 	"github.com/cloudevents/sdk-go/v2/event"
 	"github.com/openshift-hyperfleet/hyperfleet-broker/broker"
-	"github.com/openshift-hyperfleet/hyperfleet-broker/pkg/logger"
+	hfl "github.com/openshift-hyperfleet/hyperfleet-logger"
 )
 
 func main() {
@@ -26,9 +27,9 @@ func main() {
 		instanceID = "1"
 	}
 
-	// Create logger, metrics, and subscriber with subscription ID
+	// Create logger using the shared HyperFleet handler, metrics, and subscriber
 	// Both subscribers use the same subscription ID to share messages (load balancing)
-	appLogger := logger.NewTestLogger()
+	appLogger := slog.New(hfl.NewHandler("example-subscriber", "v0.0.0"))
 	metrics := broker.NewMetricsRecorder("example-subscriber", "v0.0.0", nil)
 	subscriber, err := broker.NewSubscriber(appLogger, *subscription, metrics)
 	if err != nil {

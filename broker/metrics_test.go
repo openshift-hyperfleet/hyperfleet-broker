@@ -8,7 +8,6 @@ import (
 
 	"github.com/ThreeDotsLabs/watermill/message"
 	"github.com/cloudevents/sdk-go/v2/event"
-	"github.com/openshift-hyperfleet/hyperfleet-broker/pkg/logger"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
@@ -143,14 +142,13 @@ func TestRecordDuration(t *testing.T) {
 }
 
 func TestPublisherMetricsIntegration(t *testing.T) {
-	mockLogger := logger.NewMockLogger()
 	reg := prometheus.NewRegistry()
 	metrics := NewMetricsRecorder("test-publisher", "v1.0.0", reg)
 
 	t.Run("successful publish increments published counter", func(t *testing.T) {
 		p := &publisher{
 			pub:     &fakeWatermillPublisher{},
-			logger:  mockLogger,
+			logger:  discardLogger,
 			metrics: metrics,
 		}
 
@@ -169,7 +167,7 @@ func TestPublisherMetricsIntegration(t *testing.T) {
 	t.Run("failed publish increments error counter", func(t *testing.T) {
 		p := &publisher{
 			pub:     &failingWatermillPublisher{},
-			logger:  mockLogger,
+			logger:  discardLogger,
 			metrics: metrics,
 		}
 

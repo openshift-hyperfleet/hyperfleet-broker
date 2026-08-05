@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -15,7 +14,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/openshift-hyperfleet/hyperfleet-broker/broker"
-	"github.com/openshift-hyperfleet/hyperfleet-broker/pkg/logger"
 	"github.com/openshift-hyperfleet/hyperfleet-broker/test/integration/common"
 )
 
@@ -52,7 +50,7 @@ func TestRabbitMQPerformance(t *testing.T) {
 	configMap := common.BuildConfigMap("rabbitmq", sharedRabbitMQURL, "")
 
 	// Create publisher
-	pub, err := broker.NewPublisher(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), common.NewTestMetrics(t), configMap)
+	pub, err := broker.NewPublisher(common.NewTestLogger(), common.NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
 		if err := pub.Close(); err != nil {
@@ -62,7 +60,7 @@ func TestRabbitMQPerformance(t *testing.T) {
 
 	// Create two subscribers with the same subscriptionID (shared subscription)
 	subscriptionID := "perf-subscription"
-	sub1, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), subscriptionID, common.NewTestMetrics(t), configMap)
+	sub1, err := broker.NewSubscriber(common.NewTestLogger(), subscriptionID, common.NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
 		if err := sub1.Close(); err != nil {
@@ -70,7 +68,7 @@ func TestRabbitMQPerformance(t *testing.T) {
 		}
 	}()
 
-	sub2, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), subscriptionID, common.NewTestMetrics(t), configMap)
+	sub2, err := broker.NewSubscriber(common.NewTestLogger(), subscriptionID, common.NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
 		if err := sub2.Close(); err != nil {
@@ -199,7 +197,7 @@ func TestGooglePubSubPerformance(t *testing.T) {
 	configMap["subscriber.parallelism"] = "10"
 	configMap["broker.googlepubsub.num_goroutines"] = "10"
 	// Create publisher
-	pub, err := broker.NewPublisher(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), common.NewTestMetrics(t), configMap)
+	pub, err := broker.NewPublisher(common.NewTestLogger(), common.NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
 		if err := pub.Close(); err != nil {
@@ -209,7 +207,7 @@ func TestGooglePubSubPerformance(t *testing.T) {
 
 	// Create two subscribers with the same subscriptionID (shared subscription)
 	subscriptionID := "perf-subscription"
-	sub1, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), subscriptionID, common.NewTestMetrics(t), configMap)
+	sub1, err := broker.NewSubscriber(common.NewTestLogger(), subscriptionID, common.NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
 		if err := sub1.Close(); err != nil {
@@ -217,7 +215,7 @@ func TestGooglePubSubPerformance(t *testing.T) {
 		}
 	}()
 
-	sub2, err := broker.NewSubscriber(logger.NewTestLogger(logger.WithLevel(slog.LevelWarn)), subscriptionID, common.NewTestMetrics(t), configMap)
+	sub2, err := broker.NewSubscriber(common.NewTestLogger(), subscriptionID, common.NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
 		if err := sub2.Close(); err != nil {

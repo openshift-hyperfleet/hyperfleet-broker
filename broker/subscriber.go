@@ -4,13 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/ThreeDotsLabs/watermill/message"
 	"github.com/ThreeDotsLabs/watermill/message/router/middleware"
 	"github.com/cloudevents/sdk-go/v2/event"
-	"github.com/openshift-hyperfleet/hyperfleet-broker/pkg/logger"
+	"github.com/openshift-hyperfleet/hyperfleet-broker/broker/internal/watermilladapter"
 )
 
 // HandlerFunc is a function that handles a CloudEvent
@@ -43,7 +44,7 @@ type subscriber struct {
 	parallelism    int
 	subscriptionID string
 	brokerType     string
-	logger         logger.Logger // Broker logger (always present - default logger if not provided)
+	logger         *slog.Logger
 	wg             sync.WaitGroup
 
 	// Routers and cancel functions for all subscriptions, used by Close() to ensure clean shutdown
@@ -70,15 +71,14 @@ func (s *subscriber) Subscribe(ctx context.Context, topic string, handler Handle
 	}
 
 	// Create a per-call Watermill logger adapter with the per-call context.
-	wmLogger := logger.NewWatermillLoggerAdapter(s.logger, ctx)
+	wmLogger := watermilladapter.New(s.logger, ctx)
 
-	// Log subscription start - logger is guaranteed non-nil
-	s.logger.Infof(ctx, "Starting subscription to topic %s", topic)
+	s.logger.InfoContext(ctx, "starting subscription", "topic", topic)
 
 	// Create a new router for this subscription
 	router, err := message.NewRouter(message.RouterConfig{}, wmLogger)
 	if err != nil {
-		s.logger.Errorf(ctx, "Failed to create router: %v", err)
+		s.logger.ErrorContext(ctx, "failed to create router", "error", err)
 		return fmt.Errorf("failed to create router: %w", err)
 	}
 
@@ -92,8 +92,7 @@ func (s *subscriber) Subscribe(ctx context.Context, topic string, handler Handle
 		// Use message context for tracing/metadata preservation
 		msgCtx := msg.Context()
 
-		// Log message received - logger is guaranteed non-nil
-		s.logger.Debugf(msgCtx, "Received message from topic %s", topic)
+		s.logger.DebugContext(msgCtx, "received message", "topic", topic)
 
 		// Record message consumed
 		s.metrics.RecordConsumed(topic)
@@ -101,7 +100,7 @@ func (s *subscriber) Subscribe(ctx context.Context, topic string, handler Handle
 		// Convert Watermill message to CloudEvent
 		evt, err := messageToEvent(msg)
 		if err != nil {
-			s.logger.Errorf(msgCtx, "Failed to convert message to CloudEvent: %v", err)
+			s.logger.ErrorContext(msgCtx, "failed to convert message to CloudEvent", "error", err)
 			s.metrics.RecordError(topic, "conversion")
 			// If conversion fails, we return error which triggers Nack/Retry
 			// If it's a permanent error (malformed), Retry middleware will give up after MaxRetries
@@ -116,10 +115,10 @@ func (s *subscriber) Subscribe(ctx context.Context, topic string, handler Handle
 		s.metrics.RecordDuration(topic, time.Since(start))
 
 		if err != nil {
-			s.logger.Errorf(msgCtx, "Handler failed to process event: %v", err)
+			s.logger.ErrorContext(msgCtx, "handler failed to process event", "error", err)
 			s.metrics.RecordError(topic, "handler")
 		} else {
-			s.logger.Debugf(msgCtx, "Successfully processed event %s from topic %s subscription %s", evt.ID(), topic, s.subscriptionID)
+			s.logger.DebugContext(msgCtx, "successfully processed event", "event_id", evt.ID(), "topic", topic, "subscription_id", s.subscriptionID)
 		}
 
 		return err
@@ -138,7 +137,7 @@ func (s *subscriber) Subscribe(ctx context.Context, topic string, handler Handle
 	}
 
 	// Log successful subscription setup
-	s.logger.Infof(ctx, "Successfully subscribed to topic %s subscription %s", topic, s.subscriptionID)
+	s.logger.InfoContext(ctx, "successfully subscribed", "topic", topic, "subscription_id", s.subscriptionID)
 
 	// Check if subscriber is already closed before launching the goroutine.
 	// This prevents calling wg.Add(1) after Close() has called wg.Wait().
@@ -156,16 +155,10 @@ func (s *subscriber) Subscribe(ctx context.Context, topic string, handler Handle
 	s.cancelFns = append(s.cancelFns, routerCancel)
 	s.routersMu.Unlock()
 
-	// Run the router in the background
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
+	s.wg.Go(func() {
 		if err := router.Run(routerCtx); err != nil {
-			// Determine if this is fatal (connection lost) or recoverable
 			fatal := !isContextCanceled(err)
-
-			// Log router error
-			s.logger.Errorf(ctx, "Router stopped with error: %v", err)
+			s.logger.ErrorContext(ctx, "router stopped with error", "error", err)
 
 			s.sendError(&SubscriberError{
 				Op:             "router",
@@ -176,7 +169,7 @@ func (s *subscriber) Subscribe(ctx context.Context, topic string, handler Handle
 				Fatal:          fatal,
 			})
 		}
-	}()
+	})
 
 	return nil
 }
@@ -205,9 +198,12 @@ func (s *subscriber) sendError(err *SubscriberError) {
 		// Error sent successfully
 	default:
 		// Channel full - log and drop oldest error to make room
-		s.logger.Errorf(context.Background(),
-			"Error channel full, dropping error: topic=%s, subscription_id=%s, buffer_size=%d, error=%v",
-			err.Topic, s.subscriptionID, ErrorChannelBufferSize, err.Err)
+		s.logger.ErrorContext(context.Background(),
+			"error channel full, dropping error",
+			"topic", err.Topic,
+			"subscription_id", s.subscriptionID,
+			"buffer_size", ErrorChannelBufferSize,
+			"error", err.Err)
 
 		// Try to drain one old error and send new one
 		select {
@@ -234,12 +230,12 @@ func (s *subscriber) Close() error {
 	s.closeMu.Unlock()
 
 	// Log close operation
-	s.logger.Info(context.Background(), "Closing subscriber")
+	s.logger.InfoContext(context.Background(), "closing subscriber")
 
 	// Closing the underlying subscriber stops all routers from receiving new messages
 	err := s.sub.Close()
 	if err != nil {
-		s.logger.Errorf(context.Background(), "Failed to close underlying subscriber: %v", err)
+		s.logger.ErrorContext(context.Background(), "failed to close underlying subscriber", "error", err)
 		return err
 	}
 
@@ -261,7 +257,7 @@ func (s *subscriber) Close() error {
 	// Close error channel now that all goroutines have stopped
 	close(s.errorChan)
 
-	s.logger.Info(context.Background(), "Successfully closed subscriber")
+	s.logger.InfoContext(context.Background(), "successfully closed subscriber")
 	return nil
 }
 

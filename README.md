@@ -9,7 +9,7 @@ The current implementation uses [Watermill](https://github.com/ThreeDotsLabs/wat
 
 - **Multiple Broker Support**: Works with RabbitMQ and Google Pub/Sub out of the box
 - **CloudEvents Integration**: Built-in support for CloudEvents format with automatic conversion
-- **Logger Integration**: Seamless integration with your application's logger (slog-compatible)
+- **Logger Integration**: Uses Go's standard `log/slog` - pass any `*slog.Logger`
 - **Flexible Configuration**: YAML configuration files with environment variable overrides via Viper
 - **Worker Pools**: Configurable parallel message processing for subscribers
 - **Subscription Management**: Flexible subscription IDs for load balancing (shared subscriptions) or fanout (separate subscriptions)
@@ -25,26 +25,7 @@ go get github.com/openshift-hyperfleet/hyperfleet-broker
 
 ## Logger Integration
 
-The broker library requires a logger to be provided when creating publishers and subscribers.
-
-### Logger Interface
-
-Implement the `logger.Logger` interface to use your own logger:
-
-```go
-type Logger interface {
-    Debug(ctx context.Context, message string)
-    Debugf(ctx context.Context, format string, args ...interface{})
-    Info(ctx context.Context, message string)
-    Infof(ctx context.Context, format string, args ...interface{})
-    Warn(ctx context.Context, message string)
-    Warnf(ctx context.Context, format string, args ...interface{})
-    Error(ctx context.Context, message string)
-    Errorf(ctx context.Context, format string, args ...interface{})
-}
-```
-
-This interface matches the HyperFleet adapter logger interface, ensuring consistency across HyperFleet services.
+The broker library uses Go's standard `log/slog` package. Pass any `*slog.Logger` when creating publishers and subscribers.
 
 ### Usage Examples
 
@@ -52,17 +33,16 @@ This interface matches the HyperFleet adapter logger interface, ensuring consist
 // Create metrics recorder (required)
 metrics := broker.NewMetricsRecorder("my-component", "v1.0.0", prometheus.DefaultRegisterer)
 
-// Use the default logger
-appLogger := logger.NewTestLogger()
+// Use the default slog logger
+publisher, err := broker.NewPublisher(slog.Default(), metrics)
+
+// Use a JSON handler
+appLogger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 publisher, err := broker.NewPublisher(appLogger, metrics)
 
-// Use JSON format for the default logger
-appLogger := logger.NewTestLogger(logger.WithFormat(logger.FormatJSON))
+// Use any *slog.Logger (e.g. with hyperfleet-logger handler)
+appLogger := slog.New(hfl.NewHandler("my-component", "v1.0.0"))
 publisher, err := broker.NewPublisher(appLogger, metrics)
-
-// Use your own logger implementation with config
-myLogger := createMyApplicationLogger()
-publisher, err := broker.NewPublisher(myLogger, metrics, config)
 ```
 
 ## Quick Start
@@ -76,18 +56,18 @@ package main
 import (
     "context"
     "log"
+    "log/slog"
     "time"
 
     cloudevents "github.com/cloudevents/sdk-go/v2"
     "github.com/cloudevents/sdk-go/v2/event"
     "github.com/openshift-hyperfleet/hyperfleet-broker/broker"
-    "github.com/openshift-hyperfleet/hyperfleet-broker/pkg/logger"
     "github.com/prometheus/client_golang/prometheus"
 )
 
 func main() {
     // Create logger, metrics, and publisher
-    appLogger := logger.NewTestLogger()
+    appLogger := slog.Default()
     metrics := broker.NewMetricsRecorder("example-publisher", "v1.0.0", prometheus.DefaultRegisterer)
     publisher, err := broker.NewPublisher(appLogger, metrics)
     if err != nil {
@@ -147,13 +127,13 @@ package main
 import (
     "context"
     "log"
+    "log/slog"
     "os"
     "os/signal"
     "syscall"
 
     "github.com/cloudevents/sdk-go/v2/event"
     "github.com/openshift-hyperfleet/hyperfleet-broker/broker"
-    "github.com/openshift-hyperfleet/hyperfleet-broker/pkg/logger"
     "github.com/prometheus/client_golang/prometheus"
 )
 
@@ -161,7 +141,7 @@ func main() {
     // Create logger, metrics, and subscriber with subscription ID
     // Subscribers with the same subscription ID share messages (load balancing)
     // Subscribers with different IDs receive all messages (fanout)
-    appLogger := logger.NewTestLogger()
+    appLogger := slog.Default()
     metrics := broker.NewMetricsRecorder("example-subscriber", "v1.0.0", prometheus.DefaultRegisterer)
     subscriptionID := "shared-subscription"
     subscriber, err := broker.NewSubscriber(appLogger, subscriptionID, metrics)
@@ -444,7 +424,7 @@ export SUBSCRIBER_PARALLELISM=20
 You can also provide configuration programmatically using a map:
 
 ```go
-appLogger := logger.NewTestLogger()
+appLogger := slog.Default()
 metrics := broker.NewMetricsRecorder("my-component", "v1.0.0", prometheus.DefaultRegisterer)
 configMap := map[string]string{
     "broker.type": "rabbitmq",

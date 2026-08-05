@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -12,7 +13,7 @@ import (
 	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill/message"
 	"github.com/cloudevents/sdk-go/v2/event"
-	"github.com/openshift-hyperfleet/hyperfleet-broker/pkg/logger"
+	"github.com/openshift-hyperfleet/hyperfleet-broker/broker/internal/watermilladapter"
 )
 
 const (
@@ -25,7 +26,7 @@ const (
 // Usage:
 //   - NewPublisher(logger, metrics) - uses provided logger and loads config from file
 //   - NewPublisher(logger, metrics, configMap) - uses provided logger with config map
-func NewPublisher(log logger.Logger, metrics *MetricsRecorder, configMap ...map[string]string) (Publisher, error) {
+func NewPublisher(log *slog.Logger, metrics *MetricsRecorder, configMap ...map[string]string) (Publisher, error) {
 	if log == nil {
 		return nil, fmt.Errorf("logger is required")
 	}
@@ -54,11 +55,11 @@ func NewPublisher(log logger.Logger, metrics *MetricsRecorder, configMap ...map[
 	// and reused - it doesn't support per-call logger injection. The adapter is only
 	// used for Watermill's internal logging (connection setup, batching, etc.), not
 	// for application-level publish logging which uses the broker logger directly.
-	watermillLogger := logger.NewWatermillLoggerAdapter(log, context.Background())
+	watermillLogger := watermilladapter.New(log, context.Background())
 
 	// Log configuration if enabled
 	if cfg.LogConfig {
-		log.Info(context.Background(), "Creating publisher")
+		log.InfoContext(context.Background(), "creating publisher")
 		logConfiguration(cfg, "Publisher", watermillLogger)
 	}
 
@@ -108,7 +109,7 @@ func NewPublisher(log logger.Logger, metrics *MetricsRecorder, configMap ...map[
 // Usage:
 //   - NewSubscriber(logger, "id", metrics) - uses provided logger and loads config from file
 //   - NewSubscriber(logger, "id", metrics, configMap) - uses provided logger with config map
-func NewSubscriber(log logger.Logger, subscriptionID string, metrics *MetricsRecorder, configMap ...map[string]string) (Subscriber, error) {
+func NewSubscriber(log *slog.Logger, subscriptionID string, metrics *MetricsRecorder, configMap ...map[string]string) (Subscriber, error) {
 	if subscriptionID == "" {
 		return nil, fmt.Errorf("subscriptionID is required")
 	}
@@ -138,11 +139,11 @@ func NewSubscriber(log logger.Logger, subscriptionID string, metrics *MetricsRec
 	// This is used for Watermill's internal subscriber logging (connection, queue management).
 	// A separate per-call adapter is created in Subscribe() with the request context
 	// for message routing and handling.
-	watermillLogger := logger.NewWatermillLoggerAdapter(log, context.Background())
+	watermillLogger := watermilladapter.New(log, context.Background())
 
 	// Log configuration if enabled
 	if cfg.LogConfig {
-		log.Info(context.Background(), "Creating subscriber")
+		log.InfoContext(context.Background(), "creating subscriber")
 		logConfiguration(cfg, "Subscriber", watermillLogger)
 	}
 
