@@ -2,7 +2,7 @@ default_install_hook_types: [pre-commit, commit-msg]
 
 repos:
   - repo: https://github.com/openshift-hyperfleet/hyperfleet-hooks
-    rev: 7f5119208e5cdee3f0c688881b6a4b803095f203 # v0.2.1
+    rev: d9aab6d723c9246bd2f63a982bf1d9cf0805b3a4  # frozen: v0.3.0
     hooks:
       - id: hyperfleet-commitlint
         stages: [commit-msg]
