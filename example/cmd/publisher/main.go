@@ -14,20 +14,28 @@ import (
 	hfl "github.com/openshift-hyperfleet/hyperfleet-logger"
 )
 
-func createEvent(id string, message string) event.Event {
+func createEvent(id string, message string) (event.Event, error) {
 	evt := event.New()
 	evt.SetType("com.example.event.created")
 	evt.SetSource("example-publisher")
 	evt.SetID(id)
 	evt.SetTime(time.Now())
-	evt.SetData(cloudevents.ApplicationJSON, map[string]interface{}{
+	if err := evt.SetData(cloudevents.ApplicationJSON, map[string]interface{}{
 		"message":   message,
 		"timestamp": time.Now().Format(time.RFC3339),
-	})
-	return evt
+	}); err != nil {
+		return event.Event{}, fmt.Errorf("set event data: %w", err)
+	}
+	return evt, nil
 }
 
 func main() {
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func run() error {
 	ctx := context.Background()
 
 	interval := flag.Duration("interval", 20*time.Millisecond, "Interval between publishing events")
@@ -40,22 +48,31 @@ func main() {
 	metrics := broker.NewMetricsRecorder("example-publisher", "v0.0.0", nil)
 	publisher, err := broker.NewPublisher(appLogger, metrics)
 	if err != nil {
-		log.Fatalf("Failed to create publisher: %v", err)
+		return fmt.Errorf("failed to create publisher: %w", err)
 	}
-	defer publisher.Close()
+	defer func() {
+		// Cleanup failures are logged; they do not replace the publishing result.
+		if closeErr := publisher.Close(); closeErr != nil {
+			log.Printf("Failed to close publisher: %v", closeErr)
+		}
+	}()
 
 	// Single message mode
 	if *message != "" {
-		evt := createEvent(fmt.Sprintf("event-%d", time.Now().UnixNano()), *message)
+		evt, createErr := createEvent(fmt.Sprintf("event-%d", time.Now().UnixNano()), *message)
+		if createErr != nil {
+			return createErr
+		}
 		if err := publisher.Publish(ctx, *topic, &evt); err != nil {
-			log.Fatalf("Error publishing event: %v", err)
+			return fmt.Errorf("error publishing event: %w", err)
 		}
 		log.Printf("Published single message to topic %s: %s", *topic, *message)
-		return
+		return nil
 	}
 
 	// Continuous publishing mode
-	log.Printf("Publisher started. Publishing events to topic: %s with interval: %v, broker type: %s", *topic, *interval, publisher.BrokerType())
+	log.Printf("Publisher started. Publishing events to topic: %s with interval: %v, broker type: %s",
+		*topic, *interval, publisher.BrokerType())
 	log.Printf("Press Ctrl+C to stop...")
 
 	// Publish events
@@ -65,11 +82,15 @@ func main() {
 	counter := 0
 	for range ticker.C {
 		counter++
-		evt := createEvent(fmt.Sprintf("event-%d", counter), "Hello from publisher")
+		evt, createErr := createEvent(fmt.Sprintf("event-%d", counter), "Hello from publisher")
+		if createErr != nil {
+			return createErr
+		}
 		if err := publisher.Publish(ctx, *topic, &evt); err != nil {
 			log.Printf("Error publishing event: %v", err)
 		} else {
 			log.Printf("Published event #%d (ID: %s)", counter, evt.ID())
 		}
 	}
+	return nil
 }

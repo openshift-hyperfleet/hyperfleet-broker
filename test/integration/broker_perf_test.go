@@ -254,9 +254,6 @@ func TestGooglePubSubPerformance(t *testing.T) {
 	// Give subscribers time to set up
 	time.Sleep(2 * time.Second)
 
-	// Run test for at least 1 minute
-	// testDuration := 1 * time.Minute
-	testDuration := 10 * time.Second
 	startTime := time.Now()
 	endTime := startTime.Add(testDuration)
 

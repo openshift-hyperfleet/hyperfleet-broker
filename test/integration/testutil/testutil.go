@@ -17,7 +17,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const brokerTypeRabbitMQ = "rabbitmq"
+const (
+	brokerTypeRabbitMQ     = "rabbitmq"
+	brokerTypeGooglePubSub = "googlepubsub"
+)
 
 // NewTestLogger returns a *slog.Logger for integration tests.
 func NewTestLogger() *slog.Logger {
@@ -74,11 +77,13 @@ func SetupTestEnvironment() {
 
 // BrokerTestConfig holds broker-specific test configuration
 type BrokerTestConfig struct {
+	// SetupConfigFunc optionally modifies the config after initial setup.
 	SetupConfigFunc func(*testing.T, map[string]string)
 	BrokerType      string
 	SetupSleep      time.Duration
 	ReceiveTimeout  time.Duration
-	PublishDelay    time.Duration
+	// PublishDelay is the delay between publishes; zero means no delay.
+	PublishDelay time.Duration
 }
 
 // BuildConfigMap creates a configuration map for testing
@@ -90,7 +95,7 @@ func BuildConfigMap(brokerType string, rabbitMQURL string, pubsubProjectID strin
 	switch brokerType {
 	case brokerTypeRabbitMQ:
 		configMap["broker.rabbitmq.url"] = rabbitMQURL
-	case "googlepubsub":
+	case brokerTypeGooglePubSub:
 		configMap["broker.googlepubsub.project_id"] = pubsubProjectID
 		// Enable auto-creation of topics and subscriptions for tests
 		configMap["broker.googlepubsub.create_topic_if_missing"] = "true"

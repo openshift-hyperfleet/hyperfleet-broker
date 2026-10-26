@@ -221,8 +221,7 @@ func TestBuildConfigFromMapErrorHandling(t *testing.T) {
 			if tt.expectError {
 				assert.Error(t, err)
 				assert.Nil(t, cfg)
-			} else if len(tt.configMap) == 0 {
-				// For empty map, it should return default config
+			} else {
 				assert.NoError(t, err)
 				assert.NotNil(t, cfg)
 			}

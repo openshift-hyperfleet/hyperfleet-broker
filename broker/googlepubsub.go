@@ -30,16 +30,21 @@ type googlePubSubConfig struct {
 	DeadLetterTopic        string `mapstructure:"dead_letter_topic"`
 	TopicRetentionDuration string `mapstructure:"topic_retention_duration"`
 	DeadLetterMaxAttempts  int    `mapstructure:"dead_letter_max_attempts"`
-	AckDeadlineSeconds     int    `mapstructure:"ack_deadline_seconds"`
+	// Subscription acknowledgment deadline in seconds.
+	AckDeadlineSeconds int `mapstructure:"ack_deadline_seconds"`
 	// Receive settings (client-side flow control).
 	MaxOutstandingMessages int `mapstructure:"max_outstanding_messages"`
 	MaxOutstandingBytes    int `mapstructure:"max_outstanding_bytes"`
 	NumGoroutines          int `mapstructure:"num_goroutines"`
-	// Behavior flags (default: false - don't auto-create infrastructure).
-	EnableMessageOrdering       bool `mapstructure:"enable_message_ordering"`
+	// Enable ordered message delivery (default: false).
+	EnableMessageOrdering bool `mapstructure:"enable_message_ordering"`
+	// Auto-creation flags (default: false - don't auto-create infrastructure).
 	CreateTopicIfMissing        bool `mapstructure:"create_topic_if_missing"`
 	CreateSubscriptionIfMissing bool `mapstructure:"create_subscription_if_missing"`
 }
+
+// maxRetryBackoff is the upper bound accepted by the Pub/Sub retry policy API.
+const maxRetryBackoff = 600 * time.Second
 
 // parseGoogleCloudDuration parses a Google Cloud duration string (e.g., "604800s", "10m", "1h")
 // and returns a time.Duration. Supports formats: Ns (seconds), Nm (minutes), Nh (hours), Nd (days)
@@ -343,8 +348,8 @@ func validateGooglePubSubConfig(cfg *config) error {
 			return fmt.Errorf("googlepubsub.retry_min_backoff: %w", err)
 		}
 		// Must be between 0 and 600 seconds
-		if minBackoff < 0 || minBackoff > 600*time.Second {
-			return fmt.Errorf("googlepubsub.retry_min_backoff must be between 0s and 600s")
+		if minBackoff < 0 || minBackoff > maxRetryBackoff {
+			return fmt.Errorf("googlepubsub.retry_min_backoff must be between 0s and %.0fs", maxRetryBackoff.Seconds())
 		}
 	}
 
@@ -355,8 +360,8 @@ func validateGooglePubSubConfig(cfg *config) error {
 			return fmt.Errorf("googlepubsub.retry_max_backoff: %w", err)
 		}
 		// Must be between 0 and 600 seconds
-		if maxBackoff < 0 || maxBackoff > 600*time.Second {
-			return fmt.Errorf("googlepubsub.retry_max_backoff must be between 0s and 600s")
+		if maxBackoff < 0 || maxBackoff > maxRetryBackoff {
+			return fmt.Errorf("googlepubsub.retry_max_backoff must be between 0s and %.0fs", maxRetryBackoff.Seconds())
 		}
 	}
 

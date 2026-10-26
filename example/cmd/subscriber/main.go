@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"log/slog"
 	"os"
@@ -16,6 +17,12 @@ import (
 )
 
 func main() {
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func run() error {
 	processTime := flag.Duration("process-time", 2*time.Second, "Time to simulate message processing")
 	topic := flag.String("topic", "example-topic", "Topic to subscribe to")
 	subscription := flag.String("subscription", "shared-subscription", "Subscription ID for load balancing")
@@ -33,14 +40,20 @@ func main() {
 	metrics := broker.NewMetricsRecorder("example-subscriber", "v0.0.0", nil)
 	subscriber, err := broker.NewSubscriber(appLogger, *subscription, metrics)
 	if err != nil {
-		log.Fatalf("Failed to create subscriber: %v", err)
+		return fmt.Errorf("failed to create subscriber: %w", err)
 	}
-	defer subscriber.Close()
+	defer func() {
+		// Cleanup failures are logged; they do not replace the subscription result.
+		if closeErr := subscriber.Close(); closeErr != nil {
+			log.Printf("Failed to close subscriber: %v", closeErr)
+		}
+	}()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	log.Printf("Subscriber instance %s started. Listening on topic: %s with subscription ID: %s, broker type: %s", instanceID, *topic, *subscription, subscriber.BrokerType())
+	log.Printf("Subscriber instance %s started. Listening on topic: %s with subscription ID: %s, broker type: %s",
+		instanceID, *topic, *subscription, subscriber.BrokerType())
 
 	// Start error handler goroutine to monitor infrastructure errors
 	go func() {
@@ -92,7 +105,7 @@ func main() {
 
 	// Subscribe to topic
 	if err := subscriber.Subscribe(ctx, *topic, handler); err != nil {
-		log.Fatalf("Failed to subscribe: %v", err)
+		return fmt.Errorf("failed to subscribe: %w", err)
 	}
 
 	// Wait for interrupt signal or shutdown command
@@ -105,8 +118,9 @@ func main() {
 	case <-shutdownChan:
 		log.Printf("[Subscriber %s] Received shutdown command from message", instanceID)
 	case <-ctx.Done():
-		log.Printf("[Subscriber %s] Context cancelled (fatal error occurred)", instanceID)
+		log.Printf("[Subscriber %s] Context canceled (fatal error occurred)", instanceID)
 	}
 
 	log.Printf("Shutting down subscriber instance %s...", instanceID)
+	return nil
 }

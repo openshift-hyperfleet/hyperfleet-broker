@@ -6,7 +6,7 @@ Go library: unified pub/sub API over RabbitMQ and Google Pub/Sub with CloudEvent
 
 | Target | What it runs |
 |--------|-------------|
-| `make lint` | golangci-lint v2.7.0 (pinned in tools/go.mod), using the root `.golangci.yml` aligned with Sentinel |
+| `make lint` | golangci-lint v2.7.0 (pinned in tools/go.mod), using the root `.golangci.yml` for the root and example modules |
 | `make fmt` | `gofmt -s -w .` |
 | `make test` | Unit tests: `./broker/...` (timeout 10m) |
 | `make test-integration` | Integration tests: `./test/integration/...` (sequential `-p 1`, timeout 10m) |

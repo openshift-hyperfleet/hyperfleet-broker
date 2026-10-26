@@ -7,6 +7,7 @@ gotool = "$(GO)" tool -modfile="$(TOOL_MOD)" $(1)
 # Run linter
 lint: ## Run golangci-lint
 	$(call gotool,golangci-lint) run ./...
+	cd example && "$(GO)" tool -modfile="$(abspath $(TOOL_MOD))" golangci-lint run --config=../.golangci.yml ./...
 
 .PHONY: tools
 tools: ## Ensure tool dependencies are up to date
@@ -41,4 +42,3 @@ test-integration:
 
 # Run all tests
 test-all: test test-integration
-

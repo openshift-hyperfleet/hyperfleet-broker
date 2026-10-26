@@ -88,7 +88,7 @@ func NewPublisher(log *slog.Logger, metrics *MetricsRecorder, configMap ...map[s
 		if err != nil {
 			if closeErr := pub.Close(); closeErr != nil {
 				return nil, fmt.Errorf(
-					"failed to create health check client: %w (also failed to close publisher: %v)", err, closeErr,
+					"failed to create health check client: %w (also failed to close publisher: %w)", err, closeErr,
 				)
 			}
 			return nil, fmt.Errorf("failed to create health check client: %w", err)
