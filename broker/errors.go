@@ -8,21 +8,16 @@ import (
 // SubscriberError represents an error that occurred during message processing
 // in background goroutines. These errors are sent via the Errors() channel.
 type SubscriberError struct {
-	// Op is the operation that failed: "router", "connect", "receive"
-	Op string
-
-	// Topic where the error occurred
-	Topic string
-
-	// SubscriptionID of the subscriber
-	SubscriptionID string
-
-	// Err is the underlying error
-	Err error
-
-	// Timestamp is when the error occurred
+	// Timestamp is when the error occurred.
 	Timestamp time.Time
-
+	// Err is the underlying error.
+	Err error
+	// Op is the operation that failed: "router", "connect", "receive".
+	Op string
+	// Topic where the error occurred.
+	Topic string
+	// SubscriptionID of the subscriber.
+	SubscriptionID string
 	// Fatal indicates if the subscriber has stopped and cannot continue operating.
 	// If true, the subscriber needs to be recreated.
 	Fatal bool

@@ -33,8 +33,8 @@ func SetupPubSubEmulator(t *testing.T) (string, string) {
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		if err := pubsubContainer.Terminate(ctx); err != nil {
-			t.Logf("failed to terminate pubsub container: %v", err)
+		if terminateErr := pubsubContainer.Terminate(ctx); terminateErr != nil {
+			t.Logf("failed to terminate pubsub container: %v", terminateErr)
 		}
 	})
 

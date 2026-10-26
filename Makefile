@@ -7,6 +7,7 @@ gotool = "$(GO)" tool -modfile="$(TOOL_MOD)" $(1)
 # Run linter
 lint: ## Run golangci-lint
 	$(call gotool,golangci-lint) run ./...
+	cd example && "$(GO)" tool -modfile="$(abspath $(TOOL_MOD))" golangci-lint run --config=../.golangci.yml ./...
 
 .PHONY: tools
 tools: ## Ensure tool dependencies are up to date
@@ -18,7 +19,8 @@ verify-tools: tools ## Fail in CI if tool module drifted
 
 # Format code
 fmt:
-	gofmt -s -w .
+	$(call gotool,golangci-lint) fmt ./...
+	cd example && "$(GO)" tool -modfile="$(abspath $(TOOL_MOD))" golangci-lint fmt --config=../.golangci.yml ./...
 
 # Alias for fmt (required by hyperfleet-hooks)
 gofmt: fmt
@@ -41,4 +43,3 @@ test-integration:
 
 # Run all tests
 test-all: test test-integration
-

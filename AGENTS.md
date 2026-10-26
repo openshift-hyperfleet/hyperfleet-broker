@@ -6,8 +6,8 @@ Go library: unified pub/sub API over RabbitMQ and Google Pub/Sub with CloudEvent
 
 | Target | What it runs |
 |--------|-------------|
-| `make lint` | golangci-lint v2.7.0 (pinned in tools/go.mod, no config file - default rules) |
-| `make fmt` | `gofmt -s -w .` |
+| `make lint` | golangci-lint v2.7.0 (pinned in tools/go.mod), using the root `.golangci.yml` for the root and example modules |
+| `make fmt` | Pinned golangci-lint formatters (`gofmt` + `goimports`) for the root and example modules |
 | `make test` | Unit tests: `./broker/...` (timeout 10m) |
 | `make test-integration` | Integration tests: `./test/integration/...` (sequential `-p 1`, timeout 10m) |
 | `make test-all` | Both unit + integration |
@@ -24,7 +24,7 @@ Go library: unified pub/sub API over RabbitMQ and Google Pub/Sub with CloudEvent
 | Watermill logger adapter | `broker/internal/watermilladapter/adapter.go` |
 | Config structure + validation | `broker/config.go`, `broker/rabbitmq.go`, `broker/googlepubsub.go` |
 | Config fields reference | `example/broker.example.yaml` |
-| Integration test helpers | `test/integration/common/common.go` |
+| Integration test helpers | `test/integration/testutil/testutil.go` |
 | Container setup helpers | `test/integration/rabbitmq/setup.go`, `test/integration/googlepubsub/setup.go` |
 | Leak & perf integration tests | `test/integration/broker_leak_test.go`, `test/integration/broker_perf_test.go` |
 | Examples (separate go.mod) | `example/go.mod`, `example/cmd/publisher/main.go`, `example/cmd/subscriber/main.go` |
@@ -47,7 +47,7 @@ Only patterns an agent cannot infer from reading the code:
 ### DO
 
 - Keep Watermill as internal implementation detail — never expose Watermill types in public API
-- Write integration tests for new broker-level behavior using `test/integration/common/` helpers
+- Write integration tests for new broker-level behavior using `test/integration/testutil/` helpers
 
 ### DON'T
 
@@ -61,4 +61,4 @@ Only patterns an agent cannot infer from reading the code:
 - **`example/` has its own `go.mod`** — `make test` from root does not test examples. Update `example/go.mod` when changing public API.
 - **`error_test.go` "missing rabbitmq url" test**: correctly asserts `expectError: true` since `validateRabbitMQConfig` rejects empty URLs at creation time.
 - **Google Pub/Sub subscriber auto-creates DLQ topic** (`{subscriptionID}-dlq`) when `create_topic_if_missing` is true — see `googlepubsub.go:188`.
-- **Integration tests**: call `common.SetupTestEnvironment()` first in `TestMain`, share one container per package. Topic/subscription name uniqueness is handled internally by `Run*` helper functions in `common/common.go`. Pattern at `test/integration/rabbitmq/rabbitmq_test.go:28`.
+- **Integration tests**: call `testutil.SetupTestEnvironment()` first in `TestMain`, share one container per package. Topic/subscription name uniqueness is handled internally by `Run*` helper functions in `testutil/testutil.go`. Pattern at `test/integration/rabbitmq/rabbitmq_test.go`.

@@ -18,7 +18,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/openshift-hyperfleet/hyperfleet-broker/broker"
-	"github.com/openshift-hyperfleet/hyperfleet-broker/test/integration/common"
+	"github.com/openshift-hyperfleet/hyperfleet-broker/test/integration/testutil"
 )
 
 // Shared container URLs created once in TestMain and reused across all tests in this package.
@@ -30,7 +30,7 @@ var (
 // TestMain sets up the test environment, creates shared RabbitMQ and PubSub containers,
 // runs all tests, then terminates the containers.
 func TestMain(m *testing.M) {
-	common.SetupTestEnvironment()
+	testutil.SetupTestEnvironment()
 
 	ctx := context.Background()
 
@@ -135,9 +135,9 @@ func setupBrokerTest(t *testing.T, cfg brokerTestConfig) map[string]string {
 
 	switch cfg.brokerType {
 	case "rabbitmq":
-		configMap = common.BuildConfigMap("rabbitmq", sharedRabbitMQURL, "")
+		configMap = testutil.BuildConfigMap("rabbitmq", sharedRabbitMQURL, "")
 	case "googlepubsub":
-		configMap = common.BuildConfigMap("googlepubsub", "", sharedPubSubProjectID)
+		configMap = testutil.BuildConfigMap("googlepubsub", "", sharedPubSubProjectID)
 	default:
 		t.Fatalf("unsupported broker type: %s", cfg.brokerType)
 	}
@@ -149,7 +149,7 @@ func setupBrokerTest(t *testing.T, cfg brokerTestConfig) map[string]string {
 // created by Subscribe(). Acts as a regression guard against goroutine leaks.
 func testGoroutineLeak(t *testing.T, cfg brokerTestConfig) {
 	configMap := setupBrokerTest(t, cfg)
-	pub, err := broker.NewPublisher(common.NewTestLogger(), common.NewTestMetrics(t), configMap)
+	pub, err := broker.NewPublisher(testutil.NewTestLogger(), testutil.NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 
 	// Clean up environment
@@ -158,7 +158,7 @@ func testGoroutineLeak(t *testing.T, cfg brokerTestConfig) {
 	before := runtime.NumGoroutine()
 	t.Logf("📊 Goroutines BEFORE: %d", before)
 
-	sub, err := broker.NewSubscriber(common.NewTestLogger(), "leak-demo", common.NewTestMetrics(t), configMap)
+	sub, err := broker.NewSubscriber(testutil.NewTestLogger(), "leak-demo", testutil.NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -174,7 +174,7 @@ func testGoroutineLeak(t *testing.T, cfg brokerTestConfig) {
 	t.Log("")
 
 	for i := 0; i < numSubscriptions; i++ {
-		err := sub.Subscribe(ctx, fmt.Sprintf("topic-%d", i), handler)
+		err = sub.Subscribe(ctx, fmt.Sprintf("topic-%d", i), handler)
 		require.NoError(t, err)
 	}
 
@@ -183,8 +183,8 @@ func testGoroutineLeak(t *testing.T, cfg brokerTestConfig) {
 		evt.SetType("com.example.test.event")
 		evt.SetSource("test-source")
 		evt.SetID(fmt.Sprintf("error-id-%d", i))
-		if err := evt.SetData(event.ApplicationJSON, map[string]int{"index": i}); err != nil {
-			require.NoError(t, err, "failed to set event data")
+		if setDataErr := evt.SetData(event.ApplicationJSON, map[string]int{"index": i}); setDataErr != nil {
+			require.NoError(t, setDataErr, "failed to set event data")
 		}
 
 		err = pub.Publish(context.Background(), "topic-"+strconv.Itoa(i), &evt)
@@ -230,7 +230,8 @@ func testGoroutineLeak(t *testing.T, cfg brokerTestConfig) {
 	// RESULT
 	if leaked > cfg.leakTolerance {
 		assert.FailNow(t,
-			fmt.Sprintf("GOROUTINE LEAK REGRESSION: %d goroutines leaked after Close() (tolerance: %d)", leaked, cfg.leakTolerance))
+			fmt.Sprintf("GOROUTINE LEAK REGRESSION: %d goroutines leaked after Close() (tolerance: %d)",
+				leaked, cfg.leakTolerance))
 	} else {
 		t.Logf("✅ OK: Only %d goroutines remaining (acceptable, tolerance: %d)", leaked, cfg.leakTolerance)
 	}
@@ -286,7 +287,7 @@ func testLeakIncreasesWithUsage(t *testing.T, cfg brokerTestConfig) {
 
 			configMap := setupBrokerTest(t, cfg)
 
-			sub, err := broker.NewSubscriber(common.NewTestLogger(), "leak-demo", common.NewTestMetrics(t), configMap)
+			sub, err := broker.NewSubscriber(testutil.NewTestLogger(), "leak-demo", testutil.NewTestMetrics(t), configMap)
 			require.NoError(t, err)
 
 			ctx := context.Background()
@@ -357,10 +358,10 @@ func testMultipleSubscriptionsSameTopic(t *testing.T, cfg brokerTestConfig) {
 	t.Logf("📊 Goroutines BEFORE: %d", before)
 
 	// Create publisher and subscriber
-	pub, err := broker.NewPublisher(common.NewTestLogger(), common.NewTestMetrics(t), configMap)
+	pub, err := broker.NewPublisher(testutil.NewTestLogger(), testutil.NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 
-	sub, err := broker.NewSubscriber(common.NewTestLogger(), "same-topic-test", common.NewTestMetrics(t), configMap)
+	sub, err := broker.NewSubscriber(testutil.NewTestLogger(), "same-topic-test", testutil.NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -389,7 +390,7 @@ func testMultipleSubscriptionsSameTopic(t *testing.T, cfg brokerTestConfig) {
 			mu.Unlock()
 			return nil
 		}
-		err := sub.Subscribe(ctx, sameTopic, handler)
+		err = sub.Subscribe(ctx, sameTopic, handler)
 		require.NoError(t, err, "Failed to subscribe handler %d", i)
 	}
 
@@ -409,8 +410,8 @@ func testMultipleSubscriptionsSameTopic(t *testing.T, cfg brokerTestConfig) {
 		evt.SetType("com.example.test.event")
 		evt.SetSource("test-source")
 		evt.SetID(fmt.Sprintf("msg-id-%d", i))
-		if err := evt.SetData(event.ApplicationJSON, map[string]int{"index": i}); err != nil {
-			require.NoError(t, err, "failed to set event data")
+		if setDataErr := evt.SetData(event.ApplicationJSON, map[string]int{"index": i}); setDataErr != nil {
+			require.NoError(t, setDataErr, "failed to set event data")
 		}
 
 		err = pub.Publish(context.Background(), sameTopic, &evt)
@@ -442,7 +443,8 @@ func testMultipleSubscriptionsSameTopic(t *testing.T, cfg brokerTestConfig) {
 	// Verify no goroutine leaks
 	if leaked > cfg.leakTolerance {
 		assert.FailNow(t,
-			fmt.Sprintf("GOROUTINE LEAK REGRESSION: %d goroutines leaked after Close() with multiple subscriptions to same topic (tolerance: %d)", leaked, cfg.leakTolerance))
+			fmt.Sprintf("GOROUTINE LEAK REGRESSION: %d goroutines leaked after Close() "+
+				"with multiple subscriptions to same topic (tolerance: %d)", leaked, cfg.leakTolerance))
 	} else {
 		t.Logf("✅ SUCCESS: Only %d goroutines remaining (acceptable, tolerance: %d)", leaked, cfg.leakTolerance)
 		t.Log("   All goroutines from multiple subscriptions to the same topic were properly cleaned up")
