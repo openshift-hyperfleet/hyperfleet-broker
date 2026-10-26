@@ -30,6 +30,7 @@ Go library: unified pub/sub API over RabbitMQ and Google Pub/Sub with CloudEvent
 | Examples (separate go.mod) | `example/go.mod`, `example/cmd/publisher/main.go`, `example/cmd/subscriber/main.go` |
 | Docker Compose examples | `example/rabbitmq/`, `example/googlepubsub/` |
 | Comprehensive user docs | `README.md` |
+| Logging standard | [HyperFleet logging specification](https://github.com/openshift-hyperfleet/architecture/blob/main/hyperfleet/standards/logging-specification.md) |
 
 ## Architecture context
 
