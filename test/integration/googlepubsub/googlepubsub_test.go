@@ -11,7 +11,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/openshift-hyperfleet/hyperfleet-broker/broker"
-	"github.com/openshift-hyperfleet/hyperfleet-broker/test/integration/common"
+	"github.com/openshift-hyperfleet/hyperfleet-broker/test/integration/testutil"
 	"github.com/stretchr/testify/require"
 )
 
@@ -22,7 +22,7 @@ var sharedProjectID string
 // TestMain sets up the test environment for Podman and disables Ryuk,
 // creates a shared PubSub emulator container, runs all tests, then terminates the container.
 func TestMain(m *testing.M) {
-	common.SetupTestEnvironment()
+	testutil.SetupTestEnvironment()
 
 	ctx := context.Background()
 
@@ -80,9 +80,9 @@ func TestMain(m *testing.M) {
 
 // TestPublisherSubscriber tests the full publish/subscribe flow with Google Pub/Sub
 func TestPublisherSubscriber(t *testing.T) {
-	configMap := common.BuildConfigMap("googlepubsub", "", sharedProjectID)
+	configMap := testutil.BuildConfigMap("googlepubsub", "", sharedProjectID)
 
-	common.RunPublisherSubscriber(t, configMap, common.BrokerTestConfig{
+	testutil.RunPublisherSubscriber(t, configMap, testutil.BrokerTestConfig{
 		BrokerType:     "googlepubsub",
 		SetupSleep:     2 * time.Second,
 		ReceiveTimeout: 10 * time.Second,
@@ -91,9 +91,9 @@ func TestPublisherSubscriber(t *testing.T) {
 
 // TestMultipleEvents tests that multiple events are processed correctly
 func TestMultipleEvents(t *testing.T) {
-	configMap := common.BuildConfigMap("googlepubsub", "", sharedProjectID)
+	configMap := testutil.BuildConfigMap("googlepubsub", "", sharedProjectID)
 
-	common.RunMultipleEvents(t, configMap, common.BrokerTestConfig{
+	testutil.RunMultipleEvents(t, configMap, testutil.BrokerTestConfig{
 		BrokerType:     "googlepubsub",
 		SetupSleep:     2 * time.Second,
 		ReceiveTimeout: 10 * time.Second,
@@ -102,9 +102,9 @@ func TestMultipleEvents(t *testing.T) {
 
 // TestSharedSubscription tests that two subscribers with the same subscriptionID share messages
 func TestSharedSubscription(t *testing.T) {
-	configMap := common.BuildConfigMap("googlepubsub", "", sharedProjectID)
+	configMap := testutil.BuildConfigMap("googlepubsub", "", sharedProjectID)
 
-	common.RunSharedSubscription(t, configMap, common.BrokerTestConfig{
+	testutil.RunSharedSubscription(t, configMap, testutil.BrokerTestConfig{
 		BrokerType:     "googlepubsub",
 		SetupSleep:     2 * time.Second,
 		ReceiveTimeout: 15 * time.Second,
@@ -113,9 +113,9 @@ func TestSharedSubscription(t *testing.T) {
 
 // TestFanoutSubscription tests that two subscribers with different subscriptionIDs each get all messages
 func TestFanoutSubscription(t *testing.T) {
-	configMap := common.BuildConfigMap("googlepubsub", "", sharedProjectID)
+	configMap := testutil.BuildConfigMap("googlepubsub", "", sharedProjectID)
 
-	common.RunFanoutSubscription(t, configMap, common.BrokerTestConfig{
+	testutil.RunFanoutSubscription(t, configMap, testutil.BrokerTestConfig{
 		BrokerType:     "googlepubsub",
 		SetupSleep:     2 * time.Second,
 		ReceiveTimeout: 15 * time.Second,
@@ -124,7 +124,7 @@ func TestFanoutSubscription(t *testing.T) {
 
 // TestSlowSubscriber tests that a slow subscriber processes fewer messages than a fast one
 func TestSlowSubscriber(t *testing.T) {
-	configMap := common.BuildConfigMap("googlepubsub", "", sharedProjectID)
+	configMap := testutil.BuildConfigMap("googlepubsub", "", sharedProjectID)
 
 	// Set MaxOutstandingMessages to 1 to limit how many messages can be in-flight
 	configMap["broker.googlepubsub.max_outstanding_messages"] = "1"
@@ -135,14 +135,14 @@ func TestSlowSubscriber(t *testing.T) {
 	// but with different num_goroutines to simulate fast vs slow
 	subscriptionID := fmt.Sprintf("slow-subscription-%d", time.Now().UnixNano())
 	configMap["broker.googlepubsub.num_goroutines"] = "5"
-	sub1, err := broker.NewSubscriber(common.NewTestLogger(), subscriptionID, common.NewTestMetrics(t), configMap)
+	sub1, err := broker.NewSubscriber(testutil.NewTestLogger(), subscriptionID, testutil.NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 
 	configMap["broker.googlepubsub.num_goroutines"] = "1"
-	sub2, err := broker.NewSubscriber(common.NewTestLogger(), subscriptionID, common.NewTestMetrics(t), configMap)
+	sub2, err := broker.NewSubscriber(testutil.NewTestLogger(), subscriptionID, testutil.NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 
-	common.RunSlowSubscriber(t, configMap, common.BrokerTestConfig{
+	testutil.RunSlowSubscriber(t, configMap, testutil.BrokerTestConfig{
 		SetupSleep:     2 * time.Second,
 		ReceiveTimeout: 15 * time.Second,
 		PublishDelay:   100 * time.Millisecond, // Gradual publishing for Google Pub/Sub
@@ -151,9 +151,9 @@ func TestSlowSubscriber(t *testing.T) {
 
 // TestErrorSubscriber tests that messages are redistributed when one subscriber fails
 func TestErrorSubscriber(t *testing.T) {
-	configMap := common.BuildConfigMap("googlepubsub", "", sharedProjectID)
+	configMap := testutil.BuildConfigMap("googlepubsub", "", sharedProjectID)
 
-	common.RunErrorSubscriber(t, configMap, common.BrokerTestConfig{
+	testutil.RunErrorSubscriber(t, configMap, testutil.BrokerTestConfig{
 		BrokerType:     "googlepubsub",
 		SetupSleep:     2 * time.Second,
 		ReceiveTimeout: 50 * time.Second,
@@ -162,9 +162,9 @@ func TestErrorSubscriber(t *testing.T) {
 
 // TestCloseWaitsForInFlightMessages tests that Close() waits for in-flight message processing
 func TestCloseWaitsForInFlightMessages(t *testing.T) {
-	configMap := common.BuildConfigMap("googlepubsub", "", sharedProjectID)
+	configMap := testutil.BuildConfigMap("googlepubsub", "", sharedProjectID)
 
-	common.RunCloseWaitsForInFlightMessages(t, configMap, common.BrokerTestConfig{
+	testutil.RunCloseWaitsForInFlightMessages(t, configMap, testutil.BrokerTestConfig{
 		BrokerType:     "googlepubsub",
 		SetupSleep:     2 * time.Second,
 		ReceiveTimeout: 10 * time.Second,
@@ -173,9 +173,9 @@ func TestCloseWaitsForInFlightMessages(t *testing.T) {
 
 // TestPanicHandler tests that a handler that panics doesn't cause Close() to hang
 func TestPanicHandler(t *testing.T) {
-	configMap := common.BuildConfigMap("googlepubsub", "", sharedProjectID)
+	configMap := testutil.BuildConfigMap("googlepubsub", "", sharedProjectID)
 
-	common.RunPanicHandler(t, configMap, common.BrokerTestConfig{
+	testutil.RunPanicHandler(t, configMap, testutil.BrokerTestConfig{
 		BrokerType:     "googlepubsub",
 		SetupSleep:     2 * time.Second,
 		ReceiveTimeout: 10 * time.Second,

@@ -20,6 +20,8 @@ const (
 	DefaultSubscriberParallelism = 1
 	DefaultTestParallelism       = 1
 	DefaultShutdownTimeout       = 30 * time.Second
+	brokerTypeRabbitMQ           = "rabbitmq"
+	brokerTypeGooglePubSub       = "googlepubsub"
 )
 
 // NewPublisher creates a new publisher with the provided logger, metrics recorder, and optional configuration.
@@ -68,13 +70,13 @@ func NewPublisher(log *slog.Logger, metrics *MetricsRecorder, configMap ...map[s
 	var healthCloser io.Closer
 
 	switch cfg.Broker.Type {
-	case "rabbitmq":
+	case brokerTypeRabbitMQ:
 		pub, err = newRabbitMQPublisher(cfg, watermillLogger)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create RabbitMQ publisher: %w", err)
 		}
 		hc = newRabbitMQHealthCheck(pub)
-	case "googlepubsub":
+	case brokerTypeGooglePubSub:
 		pub, err = newGooglePubSubPublisher(cfg, watermillLogger)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create Google Pub/Sub publisher: %w", err)
@@ -85,7 +87,9 @@ func NewPublisher(log *slog.Logger, metrics *MetricsRecorder, configMap ...map[s
 		healthClient, err = pubsub.NewClient(context.Background(), cfg.Broker.GooglePubSub.ProjectID)
 		if err != nil {
 			if closeErr := pub.Close(); closeErr != nil {
-				return nil, fmt.Errorf("failed to create health check client: %w (also failed to close publisher: %v)", err, closeErr)
+				return nil, fmt.Errorf(
+					"failed to create health check client: %w (also failed to close publisher: %v)", err, closeErr,
+				)
 			}
 			return nil, fmt.Errorf("failed to create health check client: %w", err)
 		}
@@ -105,11 +109,14 @@ func NewPublisher(log *slog.Logger, metrics *MetricsRecorder, configMap ...map[s
 	}, nil
 }
 
-// NewSubscriber creates a new subscriber with the provided logger, subscription ID, metrics recorder, and optional configuration.
+// NewSubscriber creates a new subscriber with the provided logger, subscription ID,
+// metrics recorder, and optional configuration.
 // Usage:
 //   - NewSubscriber(logger, "id", metrics) - uses provided logger and loads config from file
 //   - NewSubscriber(logger, "id", metrics, configMap) - uses provided logger with config map
-func NewSubscriber(log *slog.Logger, subscriptionID string, metrics *MetricsRecorder, configMap ...map[string]string) (Subscriber, error) {
+func NewSubscriber(
+	log *slog.Logger, subscriptionID string, metrics *MetricsRecorder, configMap ...map[string]string,
+) (Subscriber, error) {
 	if subscriptionID == "" {
 		return nil, fmt.Errorf("subscriptionID is required")
 	}
@@ -150,12 +157,12 @@ func NewSubscriber(log *slog.Logger, subscriptionID string, metrics *MetricsReco
 	var sub message.Subscriber
 
 	switch cfg.Broker.Type {
-	case "rabbitmq":
+	case brokerTypeRabbitMQ:
 		sub, err = newRabbitMQSubscriber(cfg, watermillLogger, subscriptionID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create RabbitMQ subscriber: %w", err)
 		}
-	case "googlepubsub":
+	case brokerTypeGooglePubSub:
 		sub, err = newGooglePubSubSubscriber(cfg, watermillLogger, subscriptionID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create Google Pub/Sub subscriber: %w", err)
@@ -183,7 +190,7 @@ func NewSubscriber(log *slog.Logger, subscriptionID string, metrics *MetricsReco
 func logConfiguration(cfg *config, component string, logger watermill.LoggerAdapter) {
 	// Create a copy of config with masked password for logging
 	logCfg := *cfg
-	if cfg.Broker.Type == "rabbitmq" && cfg.Broker.RabbitMQ.URL != "" {
+	if cfg.Broker.Type == brokerTypeRabbitMQ && cfg.Broker.RabbitMQ.URL != "" {
 		logCfg.Broker.RabbitMQ.URL = maskPassword(cfg.Broker.RabbitMQ.URL)
 	}
 
@@ -197,7 +204,9 @@ func logConfiguration(cfg *config, component string, logger watermill.LoggerAdap
 		return
 	}
 
-	logger.Info(fmt.Sprintf("=== %s Configuration (JSON) ===\n%s\n========================================", component, string(jsonBytes)), nil)
+	logger.Info(fmt.Sprintf(
+		"=== %s Configuration (JSON) ===\n%s\n========================================", component, string(jsonBytes),
+	), nil)
 }
 
 // maskPassword masks passwords in URLs for logging

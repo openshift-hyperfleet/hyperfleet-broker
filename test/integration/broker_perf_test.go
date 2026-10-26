@@ -14,23 +14,23 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/openshift-hyperfleet/hyperfleet-broker/broker"
-	"github.com/openshift-hyperfleet/hyperfleet-broker/test/integration/common"
+	"github.com/openshift-hyperfleet/hyperfleet-broker/test/integration/testutil"
 )
 
 // we keep this short for now to make the tests run faster
-const TEST_DURATION = 10 * time.Second
+const testDuration = 10 * time.Second
 
 // PerformanceTestResult holds the results of a performance test
 type PerformanceTestResult struct {
+	Timestamp         time.Time         `json:"timestamp"`
 	BrokerType        string            `json:"broker_type"`
 	TestDuration      string            `json:"test_duration"`
-	MessagesPublished int64             `json:"messages_published"`
 	Subscriber1       SubscriberMetrics `json:"subscriber_1"`
 	Subscriber2       SubscriberMetrics `json:"subscriber_2"`
+	MessagesPublished int64             `json:"messages_published"`
 	TotalReceived     int64             `json:"total_received"`
 	PublishRate       float64           `json:"publish_rate_per_sec"`
 	ReceiveRate       float64           `json:"receive_rate_per_sec"`
-	Timestamp         time.Time         `json:"timestamp"`
 }
 
 // SubscriberMetrics holds metrics for a single subscriber
@@ -47,32 +47,32 @@ func TestRabbitMQPerformance(t *testing.T) {
 
 	topic := fmt.Sprintf("perf-topic-%d", time.Now().UnixNano())
 	ctx := context.Background()
-	configMap := common.BuildConfigMap("rabbitmq", sharedRabbitMQURL, "")
+	configMap := testutil.BuildConfigMap("rabbitmq", sharedRabbitMQURL, "")
 
 	// Create publisher
-	pub, err := broker.NewPublisher(common.NewTestLogger(), common.NewTestMetrics(t), configMap)
+	pub, err := broker.NewPublisher(testutil.NewTestLogger(), testutil.NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
-		if err := pub.Close(); err != nil {
-			t.Logf("failed to close publisher: %v", err)
+		if closeErr := pub.Close(); closeErr != nil {
+			t.Logf("failed to close publisher: %v", closeErr)
 		}
 	}()
 
 	// Create two subscribers with the same subscriptionID (shared subscription)
 	subscriptionID := "perf-subscription"
-	sub1, err := broker.NewSubscriber(common.NewTestLogger(), subscriptionID, common.NewTestMetrics(t), configMap)
+	sub1, err := broker.NewSubscriber(testutil.NewTestLogger(), subscriptionID, testutil.NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
-		if err := sub1.Close(); err != nil {
-			t.Logf("failed to close subscriber 1: %v", err)
+		if closeErr := sub1.Close(); closeErr != nil {
+			t.Logf("failed to close subscriber 1: %v", closeErr)
 		}
 	}()
 
-	sub2, err := broker.NewSubscriber(common.NewTestLogger(), subscriptionID, common.NewTestMetrics(t), configMap)
+	sub2, err := broker.NewSubscriber(testutil.NewTestLogger(), subscriptionID, testutil.NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
-		if err := sub2.Close(); err != nil {
-			t.Logf("failed to close subscriber 2: %v", err)
+		if closeErr := sub2.Close(); closeErr != nil {
+			t.Logf("failed to close subscriber 2: %v", closeErr)
 		}
 	}()
 
@@ -84,15 +84,15 @@ func TestRabbitMQPerformance(t *testing.T) {
 
 	// Set up handlers
 	handler1 := func(ctx context.Context, e *event.Event) error {
-		//time.Sleep(1000 * time.Millisecond)
-		//t.Logf("Subscriber 1 received message %s - %d", e.ID(), sub1Received)
+		// time.Sleep(1000 * time.Millisecond)
+		// t.Logf("Subscriber 1 received message %s - %d", e.ID(), sub1Received)
 		atomic.AddInt64(&sub1Received, 1)
 		return nil
 	}
 
 	handler2 := func(ctx context.Context, e *event.Event) error {
-		//time.Sleep(10 * time.Millisecond)
-		//t.Logf("Subscriber 2 received message %s - %d", e.ID(), sub2Received)
+		// time.Sleep(10 * time.Millisecond)
+		// t.Logf("Subscriber 2 received message %s - %d", e.ID(), sub2Received)
 		atomic.AddInt64(&sub2Received, 1)
 		return nil
 	}
@@ -108,7 +108,7 @@ func TestRabbitMQPerformance(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	startTime := time.Now()
-	endTime := startTime.Add(TEST_DURATION)
+	endTime := startTime.Add(testDuration)
 
 	// Start publisher goroutine
 	wg.Add(1)
@@ -190,36 +190,36 @@ func TestGooglePubSubPerformance(t *testing.T) {
 
 	topic := fmt.Sprintf("perf-topic-%d", time.Now().UnixNano())
 	ctx := context.Background()
-	configMap := common.BuildConfigMap("googlepubsub", "", sharedPubSubProjectID)
+	configMap := testutil.BuildConfigMap("googlepubsub", "", sharedPubSubProjectID)
 
-	//configMap["broker.googlepubsub.max_outstanding_messages"] = "10"
+	// configMap["broker.googlepubsub.max_outstanding_messages"] = "10"
 	// Set NumGoroutines to 1 to use a single streaming pull stream
 	configMap["subscriber.parallelism"] = "10"
 	configMap["broker.googlepubsub.num_goroutines"] = "10"
 	// Create publisher
-	pub, err := broker.NewPublisher(common.NewTestLogger(), common.NewTestMetrics(t), configMap)
+	pub, err := broker.NewPublisher(testutil.NewTestLogger(), testutil.NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
-		if err := pub.Close(); err != nil {
-			t.Logf("failed to close publisher: %v", err)
+		if closeErr := pub.Close(); closeErr != nil {
+			t.Logf("failed to close publisher: %v", closeErr)
 		}
 	}()
 
 	// Create two subscribers with the same subscriptionID (shared subscription)
 	subscriptionID := "perf-subscription"
-	sub1, err := broker.NewSubscriber(common.NewTestLogger(), subscriptionID, common.NewTestMetrics(t), configMap)
+	sub1, err := broker.NewSubscriber(testutil.NewTestLogger(), subscriptionID, testutil.NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
-		if err := sub1.Close(); err != nil {
-			t.Logf("failed to close subscriber 1: %v", err)
+		if closeErr := sub1.Close(); closeErr != nil {
+			t.Logf("failed to close subscriber 1: %v", closeErr)
 		}
 	}()
 
-	sub2, err := broker.NewSubscriber(common.NewTestLogger(), subscriptionID, common.NewTestMetrics(t), configMap)
+	sub2, err := broker.NewSubscriber(testutil.NewTestLogger(), subscriptionID, testutil.NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
-		if err := sub2.Close(); err != nil {
-			t.Logf("failed to close subscriber 2: %v", err)
+		if closeErr := sub2.Close(); closeErr != nil {
+			t.Logf("failed to close subscriber 2: %v", closeErr)
 		}
 	}()
 
@@ -231,15 +231,15 @@ func TestGooglePubSubPerformance(t *testing.T) {
 
 	// Set up handlers
 	handler1 := func(ctx context.Context, e *event.Event) error {
-		//time.Sleep(1000 * time.Millisecond)
-		//t.Logf("Subscriber 1 received message %s - %d", e.ID(), sub1Received)
+		// time.Sleep(1000 * time.Millisecond)
+		// t.Logf("Subscriber 1 received message %s - %d", e.ID(), sub1Received)
 		atomic.AddInt64(&sub1Received, 1)
 		return nil
 	}
 
 	handler2 := func(ctx context.Context, e *event.Event) error {
-		//time.Sleep(1000 * time.Millisecond)
-		//t.Logf("Subscriber 2 received message %s - %d", e.ID(), sub2Received)
+		// time.Sleep(1000 * time.Millisecond)
+		// t.Logf("Subscriber 2 received message %s - %d", e.ID(), sub2Received)
 		atomic.AddInt64(&sub2Received, 1)
 		return nil
 	}
@@ -255,7 +255,7 @@ func TestGooglePubSubPerformance(t *testing.T) {
 	time.Sleep(2 * time.Second)
 
 	// Run test for at least 1 minute
-	//testDuration := 1 * time.Minute
+	// testDuration := 1 * time.Minute
 	testDuration := 10 * time.Second
 	startTime := time.Now()
 	endTime := startTime.Add(testDuration)

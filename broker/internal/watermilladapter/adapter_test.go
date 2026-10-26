@@ -13,10 +13,10 @@ import (
 
 // logRecord is the JSON structure emitted by slog.JSONHandler.
 type logRecord struct {
-	Level   string `json:"level"`
-	Message string `json:"msg"`
 	// Remaining fields (watermill fields, etc.) are captured here.
-	Extra map[string]any `json:"-"`
+	Extra   map[string]any `json:"-"`
+	Level   string         `json:"level"`
+	Message string         `json:"msg"`
 }
 
 // parseLogRecord decodes a single JSON log line from buf and returns the

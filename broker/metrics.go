@@ -8,13 +8,12 @@ import (
 
 // MetricsRecorder holds Prometheus metrics for the broker library.
 type MetricsRecorder struct {
-	component string
-	version   string
-
 	messagesConsumed  *prometheus.CounterVec
 	messagesPublished *prometheus.CounterVec
 	errors            *prometheus.CounterVec
 	messageDuration   *prometheus.HistogramVec
+	component         string
+	version           string
 }
 
 // NewMetricsRecorder creates a new MetricsRecorder and registers all metrics

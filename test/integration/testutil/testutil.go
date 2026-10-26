@@ -1,4 +1,4 @@
-package common
+package testutil
 
 import (
 	"context"
@@ -16,6 +16,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+const brokerTypeRabbitMQ = "rabbitmq"
 
 // NewTestLogger returns a *slog.Logger for integration tests.
 func NewTestLogger() *slog.Logger {
@@ -72,11 +74,11 @@ func SetupTestEnvironment() {
 
 // BrokerTestConfig holds broker-specific test configuration
 type BrokerTestConfig struct {
+	SetupConfigFunc func(*testing.T, map[string]string)
 	BrokerType      string
 	SetupSleep      time.Duration
 	ReceiveTimeout  time.Duration
-	SetupConfigFunc func(*testing.T, map[string]string) // Optional function to modify config after initial setup
-	PublishDelay    time.Duration                       // Delay between publishes (for gradual publishing, 0 = no delay)
+	PublishDelay    time.Duration
 }
 
 // BuildConfigMap creates a configuration map for testing
@@ -86,7 +88,7 @@ func BuildConfigMap(brokerType string, rabbitMQURL string, pubsubProjectID strin
 		"subscriber.parallelism": "1",
 	}
 	switch brokerType {
-	case "rabbitmq":
+	case brokerTypeRabbitMQ:
 		configMap["broker.rabbitmq.url"] = rabbitMQURL
 	case "googlepubsub":
 		configMap["broker.googlepubsub.project_id"] = pubsubProjectID
@@ -106,8 +108,8 @@ func RunPublisherSubscriber(t *testing.T, configMap map[string]string, cfg Broke
 	pub, err := broker.NewPublisher(NewTestLogger(), NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
-		if err := pub.Close(); err != nil {
-			t.Logf("failed to close publisher: %v", err)
+		if closeErr := pub.Close(); closeErr != nil {
+			t.Logf("failed to close publisher: %v", closeErr)
 		}
 	}()
 	// Create subscriber
@@ -115,8 +117,8 @@ func RunPublisherSubscriber(t *testing.T, configMap map[string]string, cfg Broke
 	sub, err := broker.NewSubscriber(NewTestLogger(), subscriptionID, NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
-		if err := sub.Close(); err != nil {
-			t.Logf("failed to close subscriber: %v", err)
+		if closeErr := sub.Close(); closeErr != nil {
+			t.Logf("failed to close subscriber: %v", closeErr)
 		}
 	}()
 	// Create a CloudEvent
@@ -124,10 +126,10 @@ func RunPublisherSubscriber(t *testing.T, configMap map[string]string, cfg Broke
 	evt.SetType("com.example.test.event")
 	evt.SetSource("test-source")
 	evt.SetID("test-id-123")
-	if err := evt.SetData(event.ApplicationJSON, map[string]string{
+	if setDataErr := evt.SetData(event.ApplicationJSON, map[string]string{
 		"message": "Hello, World!",
-	}); err != nil {
-		require.NoError(t, err, "failed to set event data")
+	}); setDataErr != nil {
+		require.NoError(t, setDataErr, "failed to set event data")
 	}
 	// Set up handler
 	receivedEvents := make(chan *event.Event, 1)
@@ -161,16 +163,16 @@ func RunMultipleEvents(t *testing.T, configMap map[string]string, cfg BrokerTest
 	pub, err := broker.NewPublisher(NewTestLogger(), NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
-		if err := pub.Close(); err != nil {
-			t.Logf("failed to close publisher: %v", err)
+		if closeErr := pub.Close(); closeErr != nil {
+			t.Logf("failed to close publisher: %v", closeErr)
 		}
 	}()
 	subscriptionID := fmt.Sprintf("test-subscription-%d", id)
 	sub, err := broker.NewSubscriber(NewTestLogger(), subscriptionID, NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
-		if err := sub.Close(); err != nil {
-			t.Logf("failed to close subscriber: %v", err)
+		if closeErr := sub.Close(); closeErr != nil {
+			t.Logf("failed to close subscriber: %v", closeErr)
 		}
 	}()
 	// Create two different event types
@@ -178,15 +180,15 @@ func RunMultipleEvents(t *testing.T, configMap map[string]string, cfg BrokerTest
 	evt1.SetType("com.example.event.type1")
 	evt1.SetSource("test-source")
 	evt1.SetID("id-1")
-	if err := evt1.SetData(event.ApplicationJSON, map[string]string{"type": "1"}); err != nil {
-		require.NoError(t, err, "failed to set event data")
+	if setDataErr := evt1.SetData(event.ApplicationJSON, map[string]string{"type": "1"}); setDataErr != nil {
+		require.NoError(t, setDataErr, "failed to set event data")
 	}
 	evt2 := event.New()
 	evt2.SetType("com.example.event.type2")
 	evt2.SetSource("test-source")
 	evt2.SetID("id-2")
-	if err := evt2.SetData(event.ApplicationJSON, map[string]string{"type": "2"}); err != nil {
-		require.NoError(t, err, "failed to set event data")
+	if setDataErr := evt2.SetData(event.ApplicationJSON, map[string]string{"type": "2"}); setDataErr != nil {
+		require.NoError(t, setDataErr, "failed to set event data")
 	}
 	// Set up handler to collect all events
 	receivedEvents := make(chan *event.Event, 2)
@@ -225,8 +227,8 @@ func RunSharedSubscription(t *testing.T, configMap map[string]string, cfg Broker
 	pub, err := broker.NewPublisher(NewTestLogger(), NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
-		if err := pub.Close(); err != nil {
-			t.Logf("failed to close publisher: %v", err)
+		if closeErr := pub.Close(); closeErr != nil {
+			t.Logf("failed to close publisher: %v", closeErr)
 		}
 	}()
 	// Create two subscribers with the same subscriptionID
@@ -235,15 +237,15 @@ func RunSharedSubscription(t *testing.T, configMap map[string]string, cfg Broker
 	sub1, err := broker.NewSubscriber(NewTestLogger(), subscriptionID, NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
-		if err := sub1.Close(); err != nil {
-			t.Logf("failed to close subscriber 1: %v", err)
+		if closeErr := sub1.Close(); closeErr != nil {
+			t.Logf("failed to close subscriber 1: %v", closeErr)
 		}
 	}()
 	sub2, err := broker.NewSubscriber(NewTestLogger(), subscriptionID, NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
-		if err := sub2.Close(); err != nil {
-			t.Logf("failed to close subscriber 2: %v", err)
+		if closeErr := sub2.Close(); closeErr != nil {
+			t.Logf("failed to close subscriber 2: %v", closeErr)
 		}
 	}()
 	// Set up handlers to collect events
@@ -270,8 +272,8 @@ func RunSharedSubscription(t *testing.T, configMap map[string]string, cfg Broker
 		evt.SetType("com.example.test.event")
 		evt.SetSource("test-source")
 		evt.SetID(fmt.Sprintf("id-%d", i))
-		if err := evt.SetData(event.ApplicationJSON, map[string]int{"index": i}); err != nil {
-			require.NoError(t, err, "failed to set event data")
+		if setDataErr := evt.SetData(event.ApplicationJSON, map[string]int{"index": i}); setDataErr != nil {
+			require.NoError(t, setDataErr, "failed to set event data")
 		}
 		err = pub.Publish(ctx, topic, &evt)
 		require.NoError(t, err)
@@ -312,8 +314,8 @@ func RunFanoutSubscription(t *testing.T, configMap map[string]string, cfg Broker
 	pub, err := broker.NewPublisher(NewTestLogger(), NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
-		if err := pub.Close(); err != nil {
-			t.Logf("failed to close publisher: %v", err)
+		if closeErr := pub.Close(); closeErr != nil {
+			t.Logf("failed to close publisher: %v", closeErr)
 		}
 	}()
 	// Create two subscribers with different subscriptionIDs
@@ -321,15 +323,15 @@ func RunFanoutSubscription(t *testing.T, configMap map[string]string, cfg Broker
 	sub1, err := broker.NewSubscriber(NewTestLogger(), fmt.Sprintf("fanout-sub-1-%d", id), NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
-		if err := sub1.Close(); err != nil {
-			t.Logf("failed to close subscriber 1: %v", err)
+		if closeErr := sub1.Close(); closeErr != nil {
+			t.Logf("failed to close subscriber 1: %v", closeErr)
 		}
 	}()
 	sub2, err := broker.NewSubscriber(NewTestLogger(), fmt.Sprintf("fanout-sub-2-%d", id), NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
-		if err := sub2.Close(); err != nil {
-			t.Logf("failed to close subscriber 2: %v", err)
+		if closeErr := sub2.Close(); closeErr != nil {
+			t.Logf("failed to close subscriber 2: %v", closeErr)
 		}
 	}()
 	// Set up handlers to collect events
@@ -358,8 +360,8 @@ func RunFanoutSubscription(t *testing.T, configMap map[string]string, cfg Broker
 		evt.SetSource("test-source")
 		evt.SetID(fmt.Sprintf("fanout-id-%d", i))
 		messageIDs[i] = evt.ID()
-		if err := evt.SetData(event.ApplicationJSON, map[string]int{"index": i}); err != nil {
-			require.NoError(t, err, "failed to set event data")
+		if setDataErr := evt.SetData(event.ApplicationJSON, map[string]int{"index": i}); setDataErr != nil {
+			require.NoError(t, setDataErr, "failed to set event data")
 		}
 		err = pub.Publish(ctx, topic, &evt)
 		require.NoError(t, err)
@@ -403,18 +405,18 @@ func RunSlowSubscriber(t *testing.T, configMap map[string]string, cfg BrokerTest
 	pub, err := broker.NewPublisher(NewTestLogger(), NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
-		if err := pub.Close(); err != nil {
-			t.Logf("failed to close publisher: %v", err)
+		if closeErr := pub.Close(); closeErr != nil {
+			t.Logf("failed to close publisher: %v", closeErr)
 		}
 	}()
 	defer func() {
-		if err := sub1.Close(); err != nil {
-			t.Logf("failed to close subscriber 1: %v", err)
+		if closeErr := sub1.Close(); closeErr != nil {
+			t.Logf("failed to close subscriber 1: %v", closeErr)
 		}
 	}()
 	defer func() {
-		if err := sub2.Close(); err != nil {
-			t.Logf("failed to close subscriber 2: %v", err)
+		if closeErr := sub2.Close(); closeErr != nil {
+			t.Logf("failed to close subscriber 2: %v", closeErr)
 		}
 	}()
 	// Metrics
@@ -446,8 +448,8 @@ func RunSlowSubscriber(t *testing.T, configMap map[string]string, cfg BrokerTest
 		evt.SetType("com.example.test.event")
 		evt.SetSource("test-source")
 		evt.SetID(fmt.Sprintf("slow-id-%d", i))
-		if err := evt.SetData(event.ApplicationJSON, map[string]int{"index": i}); err != nil {
-			require.NoError(t, err, "failed to set event data")
+		if setDataErr := evt.SetData(event.ApplicationJSON, map[string]int{"index": i}); setDataErr != nil {
+			require.NoError(t, setDataErr, "failed to set event data")
 		}
 		err = pub.Publish(ctx, topic, &evt)
 		require.NoError(t, err)
@@ -491,8 +493,8 @@ func RunErrorSubscriber(t *testing.T, configMap map[string]string, cfg BrokerTes
 	pub, err := broker.NewPublisher(NewTestLogger(), NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
-		if err := pub.Close(); err != nil {
-			t.Logf("failed to close publisher: %v", err)
+		if closeErr := pub.Close(); closeErr != nil {
+			t.Logf("failed to close publisher: %v", closeErr)
 		}
 	}()
 	// Create two subscribers with the same subscriptionID (shared subscription)
@@ -500,15 +502,15 @@ func RunErrorSubscriber(t *testing.T, configMap map[string]string, cfg BrokerTes
 	sub1, err := broker.NewSubscriber(NewTestLogger(), subscriptionID, NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
-		if err := sub1.Close(); err != nil {
-			t.Logf("failed to close subscriber 1: %v", err)
+		if closeErr := sub1.Close(); closeErr != nil {
+			t.Logf("failed to close subscriber 1: %v", closeErr)
 		}
 	}()
 	sub2, err := broker.NewSubscriber(NewTestLogger(), subscriptionID, NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
-		if err := sub2.Close(); err != nil {
-			t.Logf("failed to close subscriber 2: %v", err)
+		if closeErr := sub2.Close(); closeErr != nil {
+			t.Logf("failed to close subscriber 2: %v", closeErr)
 		}
 	}()
 	// Metrics
@@ -537,8 +539,8 @@ func RunErrorSubscriber(t *testing.T, configMap map[string]string, cfg BrokerTes
 		evt.SetType("com.example.test.event")
 		evt.SetSource("test-source")
 		evt.SetID(fmt.Sprintf("error-id-%d", i))
-		if err := evt.SetData(event.ApplicationJSON, map[string]int{"index": i}); err != nil {
-			require.NoError(t, err, "failed to set event data")
+		if setDataErr := evt.SetData(event.ApplicationJSON, map[string]int{"index": i}); setDataErr != nil {
+			require.NoError(t, setDataErr, "failed to set event data")
 		}
 		err = pub.Publish(ctx, topic, &evt)
 		require.NoError(t, err)
@@ -564,14 +566,14 @@ func RunErrorSubscriber(t *testing.T, configMap map[string]string, cfg BrokerTes
 func RunCloseWaitsForInFlightMessages(t *testing.T, configMap map[string]string, cfg BrokerTestConfig) {
 	topic := uniqueTopic("close-test-topic")
 	ctx := context.Background()
-	if cfg.BrokerType == "rabbitmq" {
+	if cfg.BrokerType == brokerTypeRabbitMQ {
 		configMap["subscriber.parallelism"] = "6"
 	}
 	pub, err := broker.NewPublisher(NewTestLogger(), NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
-		if err := pub.Close(); err != nil {
-			t.Logf("failed to close publisher: %v", err)
+		if closeErr := pub.Close(); closeErr != nil {
+			t.Logf("failed to close publisher: %v", closeErr)
 		}
 	}()
 	subscriptionID := fmt.Sprintf("close-test-sub-%d", uniqueSuffix())
@@ -601,8 +603,8 @@ func RunCloseWaitsForInFlightMessages(t *testing.T, configMap map[string]string,
 		evt.SetType("com.example.test.event")
 		evt.SetSource("test-source")
 		evt.SetID(fmt.Sprintf("close-test-id-%d", i))
-		if err := evt.SetData(event.ApplicationJSON, map[string]int{"index": i}); err != nil {
-			require.NoError(t, err, "failed to set event data")
+		if setDataErr := evt.SetData(event.ApplicationJSON, map[string]int{"index": i}); setDataErr != nil {
+			require.NoError(t, setDataErr, "failed to set event data")
 		}
 		err = pub.Publish(ctx, topic, &evt)
 		require.NoError(t, err)
@@ -649,14 +651,14 @@ func RunCloseWaitsForInFlightMessages(t *testing.T, configMap map[string]string,
 func RunPanicHandler(t *testing.T, configMap map[string]string, cfg BrokerTestConfig) {
 	topic := uniqueTopic("panic-test-topic")
 	ctx := context.Background()
-	if cfg.BrokerType == "rabbitmq" {
+	if cfg.BrokerType == brokerTypeRabbitMQ {
 		configMap["subscriber.parallelism"] = "3"
 	}
 	pub, err := broker.NewPublisher(NewTestLogger(), NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
-		if err := pub.Close(); err != nil {
-			t.Logf("failed to close publisher: %v", err)
+		if closeErr := pub.Close(); closeErr != nil {
+			t.Logf("failed to close publisher: %v", closeErr)
 		}
 	}()
 	subscriptionID := fmt.Sprintf("panic-test-sub-%d", uniqueSuffix())
@@ -684,8 +686,8 @@ func RunPanicHandler(t *testing.T, configMap map[string]string, cfg BrokerTestCo
 		evt.SetType("com.example.test.event")
 		evt.SetSource("test-source")
 		evt.SetID(fmt.Sprintf("panic-test-id-%d", i))
-		if err := evt.SetData(event.ApplicationJSON, map[string]int{"index": i}); err != nil {
-			require.NoError(t, err, "failed to set event data")
+		if setDataErr := evt.SetData(event.ApplicationJSON, map[string]int{"index": i}); setDataErr != nil {
+			require.NoError(t, setDataErr, "failed to set event data")
 		}
 		err = pub.Publish(ctx, topic, &evt)
 		require.NoError(t, err)
@@ -733,8 +735,8 @@ func RunErrorChannelNotification(t *testing.T, configMap map[string]string, cfg 
 	sub, err := broker.NewSubscriber(NewTestLogger(), subscriptionID, NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() {
-		if err := sub.Close(); err != nil {
-			t.Logf("failed to close subscriber: %v", err)
+		if closeErr := sub.Close(); closeErr != nil {
+			t.Logf("failed to close subscriber: %v", closeErr)
 		}
 	}()
 	// Start goroutine to collect errors

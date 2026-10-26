@@ -17,9 +17,9 @@ type rabbitMQConfig struct {
 	ExchangeType     string `mapstructure:"exchange_type"`
 	Queue            string `mapstructure:"queue"`
 	RoutingKey       string `mapstructure:"routing_key"`
+	ConsumerTag      string `mapstructure:"consumer_tag"`
 	PrefetchCount    int    `mapstructure:"prefetch_count"`
 	PrefetchSize     int    `mapstructure:"prefetch_size"`
-	ConsumerTag      string `mapstructure:"consumer_tag"`
 	PublisherConfirm bool   `mapstructure:"publisher_confirm"`
 }
 
@@ -78,7 +78,9 @@ func newRabbitMQPublisher(cfg *config, logger watermill.LoggerAdapter) (message.
 }
 
 // newRabbitMQSubscriber creates a RabbitMQ subscriber
-func newRabbitMQSubscriber(cfg *config, logger watermill.LoggerAdapter, subscriptionID string) (message.Subscriber, error) {
+func newRabbitMQSubscriber(
+	cfg *config, logger watermill.LoggerAdapter, subscriptionID string,
+) (message.Subscriber, error) {
 	// Create a queue name generator that incorporates subscription IDs
 	// The topic passed to Subscribe will be the original topic, and we append subscription ID for queue naming
 	queueNameGenerator := func(topic string) string {

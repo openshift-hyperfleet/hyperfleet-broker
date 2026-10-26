@@ -11,10 +11,10 @@ import (
 
 func TestBuildConfigFromMap(t *testing.T) {
 	tests := []struct {
-		name        string
 		configMap   map[string]string
-		expectError bool
 		validate    func(*testing.T, *config)
+		name        string
+		expectError bool
 	}{
 		{
 			name: "valid rabbitmq config",
@@ -147,11 +147,11 @@ func TestLoadConfig(t *testing.T) {
 	}()
 
 	tests := []struct {
-		name        string
-		setup       func(*testing.T) string // Returns config file path
+		setup       func(*testing.T) string // Returns config file path.
 		cleanup     func(*testing.T, string)
-		expectError bool
 		validate    func(*testing.T, *config)
+		name        string
+		expectError bool
 	}{
 		{
 			name: "load from valid yaml file",
@@ -347,6 +347,61 @@ subscriber:
 	}
 }
 
+func TestGooglePubSubRetryBackoffValidation(t *testing.T) {
+	tests := []struct {
+		name     string
+		minimum  string
+		maximum  string
+		errorMsg string
+	}{
+		{name: "both unset"},
+		{name: "minimum only", minimum: "10s"},
+		{name: "maximum only", maximum: "100s"},
+		{name: "zero bounds", minimum: "0s", maximum: "0s"},
+		{name: "equal bounds", minimum: "600s", maximum: "600s"},
+		{name: "ordered bounds", minimum: "10s", maximum: "600s"},
+		{
+			name: "reversed bounds", minimum: "100s", maximum: "10s",
+			errorMsg: "retry_min_backoff must be less than or equal to retry_max_backoff",
+		},
+		{name: "invalid minimum", minimum: "invalid", errorMsg: "googlepubsub.retry_min_backoff:"},
+		{name: "invalid maximum", maximum: "invalid", errorMsg: "googlepubsub.retry_max_backoff:"},
+		{
+			name: "negative minimum", minimum: "-1s",
+			errorMsg: "retry_min_backoff must be between 0s and 600s",
+		},
+		{
+			name: "negative maximum", maximum: "-1s",
+			errorMsg: "retry_max_backoff must be between 0s and 600s",
+		},
+		{
+			name: "minimum above limit", minimum: "601s",
+			errorMsg: "retry_min_backoff must be between 0s and 600s",
+		},
+		{
+			name: "maximum above limit", maximum: "601s",
+			errorMsg: "retry_max_backoff must be between 0s and 600s",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config{
+				Broker: brokerConfig{
+					GooglePubSub: googlePubSubConfig{
+						ProjectID: "test-project", RetryMinBackoff: tt.minimum, RetryMaxBackoff: tt.maximum,
+					},
+				},
+			}
+			err := validateGooglePubSubConfig(cfg)
+			if tt.errorMsg == "" {
+				require.NoError(t, err)
+			} else {
+				require.ErrorContains(t, err, tt.errorMsg)
+			}
+		})
+	}
+}
+
 func TestLoadConfigWithInvalidUnmarshal(t *testing.T) {
 	// Save original environment
 	originalConfigFile := os.Getenv("BROKER_CONFIG_FILE")
@@ -373,12 +428,12 @@ broker:
 `
 	err := os.WriteFile(configPath, []byte(configContent), 0644)
 	require.NoError(t, err)
-	if err := os.Setenv("BROKER_CONFIG_FILE", configPath); err != nil {
-		t.Fatalf("failed to set BROKER_CONFIG_FILE: %v", err)
+	if envErr := os.Setenv("BROKER_CONFIG_FILE", configPath); envErr != nil {
+		t.Fatalf("failed to set BROKER_CONFIG_FILE: %v", envErr)
 	}
 	defer func() {
-		if err := os.Unsetenv("BROKER_CONFIG_FILE"); err != nil {
-			t.Logf("failed to unset BROKER_CONFIG_FILE: %v", err)
+		if envErr := os.Unsetenv("BROKER_CONFIG_FILE"); envErr != nil {
+			t.Logf("failed to unset BROKER_CONFIG_FILE: %v", envErr)
 		}
 	}()
 
@@ -398,8 +453,8 @@ func TestBuildConfigFromMapWithInvalidTypes(t *testing.T) {
 	// Test that invalid type conversions are handled
 	// Note: Viper might handle some conversions, so these tests verify behavior
 	tests := []struct {
-		name        string
 		configMap   map[string]string
+		name        string
 		expectError bool
 	}{
 		{
@@ -437,10 +492,10 @@ func TestBuildConfigFromMapWithInvalidTypes(t *testing.T) {
 
 func TestGooglePubSubConfigValidation(t *testing.T) {
 	tests := []struct {
-		name        string
 		configMap   map[string]string
-		expectError bool
+		name        string
 		errorMsg    string
+		expectError bool
 	}{
 		{
 			name: "valid config with all settings",

@@ -14,10 +14,10 @@ func newErrorTestMetrics(t *testing.T) *MetricsRecorder {
 
 func TestNewPublisherErrorHandling(t *testing.T) {
 	tests := []struct {
-		name        string
 		configMap   map[string]string
-		expectError bool
+		name        string
 		errorMsg    string
+		expectError bool
 	}{
 		{
 			name: "unsupported broker type",
@@ -91,11 +91,11 @@ func TestNewPublisherErrorHandling(t *testing.T) {
 
 func TestNewSubscriberErrorHandling(t *testing.T) {
 	tests := []struct {
+		configMap      map[string]string
 		name           string
 		subscriptionID string
-		configMap      map[string]string
-		expectError    bool
 		errorMsg       string
+		expectError    bool
 	}{
 		{
 			name:           "empty subscription ID",
@@ -182,8 +182,8 @@ func TestPublisherPublishErrorHandling(t *testing.T) {
 
 func TestBuildConfigFromMapErrorHandling(t *testing.T) {
 	tests := []struct {
-		name        string
 		configMap   map[string]string
+		name        string
 		expectError bool
 	}{
 		{
@@ -221,12 +221,10 @@ func TestBuildConfigFromMapErrorHandling(t *testing.T) {
 			if tt.expectError {
 				assert.Error(t, err)
 				assert.Nil(t, cfg)
-			} else {
+			} else if len(tt.configMap) == 0 {
 				// For empty map, it should return default config
-				if len(tt.configMap) == 0 {
-					assert.NoError(t, err)
-					assert.NotNil(t, cfg)
-				}
+				assert.NoError(t, err)
+				assert.NotNil(t, cfg)
 			}
 		})
 	}

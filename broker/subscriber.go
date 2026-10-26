@@ -40,26 +40,22 @@ const (
 
 // subscriber wraps a Watermill subscriber and provides worker pools for parallel message processing
 type subscriber struct {
-	sub            message.Subscriber
-	parallelism    int
-	subscriptionID string
-	brokerType     string
-	logger         *slog.Logger
-	wg             sync.WaitGroup
-
-	// Routers and cancel functions for all subscriptions, used by Close() to ensure clean shutdown
-	routers   []*message.Router
-	cancelFns []context.CancelFunc
-	routersMu sync.Mutex
-
-	// Error notification channel
-	errorChan chan *SubscriberError
-
-	// Track if closed to prevent sending on closed channel
-	closed  bool
-	closeMu sync.RWMutex
-
+	sub     message.Subscriber
+	logger  *slog.Logger
 	metrics *MetricsRecorder
+	// Error notification channel.
+	errorChan      chan *SubscriberError
+	brokerType     string
+	subscriptionID string
+	// Routers and cancel functions for all subscriptions, used by Close() to ensure clean shutdown.
+	routers     []*message.Router
+	cancelFns   []context.CancelFunc
+	wg          sync.WaitGroup
+	parallelism int
+	closeMu     sync.RWMutex
+	routersMu   sync.Mutex
+	// Track if closed to prevent sending on closed channel.
+	closed bool
 }
 
 // Subscribe subscribes to a topic and processes messages with the provided handler
@@ -118,7 +114,8 @@ func (s *subscriber) Subscribe(ctx context.Context, topic string, handler Handle
 			s.logger.ErrorContext(msgCtx, "handler failed to process event", "error", err)
 			s.metrics.RecordError(topic, "handler")
 		} else {
-			s.logger.DebugContext(msgCtx, "successfully processed event", "event_id", evt.ID(), "topic", topic, "subscription_id", s.subscriptionID)
+			s.logger.DebugContext(msgCtx, "successfully processed event",
+				"event_id", evt.ID(), "topic", topic, "subscription_id", s.subscriptionID)
 		}
 
 		return err

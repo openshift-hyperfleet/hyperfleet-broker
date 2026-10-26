@@ -124,10 +124,14 @@ func TestRecordError(t *testing.T) {
 	m.RecordError("orders", "conversion")
 	m.RecordError("orders", "handler")
 
-	handlerLabels := map[string]string{"topic": "orders", "error_type": "handler", "component": "test-component", "version": "v0.1.0"}
+	handlerLabels := map[string]string{
+		"topic": "orders", "error_type": "handler", "component": "test-component", "version": "v0.1.0",
+	}
 	assert.Equal(t, float64(2), getCounterValue(t, reg, "hyperfleet_broker_errors_total", handlerLabels))
 
-	conversionLabels := map[string]string{"topic": "orders", "error_type": "conversion", "component": "test-component", "version": "v0.1.0"}
+	conversionLabels := map[string]string{
+		"topic": "orders", "error_type": "conversion", "component": "test-component", "version": "v0.1.0",
+	}
 	assert.Equal(t, float64(1), getCounterValue(t, reg, "hyperfleet_broker_errors_total", conversionLabels))
 }
 
@@ -179,7 +183,9 @@ func TestPublisherMetricsIntegration(t *testing.T) {
 		err := p.Publish(context.Background(), "fail-topic", &evt)
 		assert.Error(t, err)
 
-		labels := map[string]string{"topic": "fail-topic", "error_type": "publish", "component": "test-publisher", "version": "v1.0.0"}
+		labels := map[string]string{
+			"topic": "fail-topic", "error_type": "publish", "component": "test-publisher", "version": "v1.0.0",
+		}
 		assert.Equal(t, float64(1), getCounterValue(t, reg, "hyperfleet_broker_errors_total", labels))
 	})
 }

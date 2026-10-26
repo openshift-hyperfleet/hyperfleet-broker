@@ -28,8 +28,8 @@ func SetupRabbitMQContainer(t *testing.T) string {
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		if err := rabbitmqContainer.Terminate(ctx); err != nil {
-			t.Logf("failed to terminate rabbitmq container: %v", err)
+		if terminateErr := rabbitmqContainer.Terminate(ctx); terminateErr != nil {
+			t.Logf("failed to terminate rabbitmq container: %v", terminateErr)
 		}
 	})
 

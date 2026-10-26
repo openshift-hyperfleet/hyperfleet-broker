@@ -19,30 +19,24 @@ import (
 
 // googlePubSubConfig holds Google Pub/Sub-specific configuration
 type googlePubSubConfig struct {
-	// Connection settings
+	// Connection settings.
 	ProjectID string `mapstructure:"project_id"`
-
-	// Subscription settings
-	AckDeadlineSeconds       int    `mapstructure:"ack_deadline_seconds"`
+	// Subscription duration settings.
 	MessageRetentionDuration string `mapstructure:"message_retention_duration"`
 	ExpirationTTL            string `mapstructure:"expiration_ttl"`
-	EnableMessageOrdering    bool   `mapstructure:"enable_message_ordering"`
 	RetryMinBackoff          string `mapstructure:"retry_min_backoff"`
 	RetryMaxBackoff          string `mapstructure:"retry_max_backoff"`
-
-	// Dead letter settings
-	DeadLetterTopic       string `mapstructure:"dead_letter_topic"`
-	DeadLetterMaxAttempts int    `mapstructure:"dead_letter_max_attempts"`
-
-	// Topic settings
+	// Dead letter topic and topic retention settings.
+	DeadLetterTopic        string `mapstructure:"dead_letter_topic"`
 	TopicRetentionDuration string `mapstructure:"topic_retention_duration"`
-
-	// Receive settings (client-side flow control)
+	DeadLetterMaxAttempts  int    `mapstructure:"dead_letter_max_attempts"`
+	AckDeadlineSeconds     int    `mapstructure:"ack_deadline_seconds"`
+	// Receive settings (client-side flow control).
 	MaxOutstandingMessages int `mapstructure:"max_outstanding_messages"`
 	MaxOutstandingBytes    int `mapstructure:"max_outstanding_bytes"`
 	NumGoroutines          int `mapstructure:"num_goroutines"`
-
-	// Behavior flags (default: false - don't auto-create infrastructure)
+	// Behavior flags (default: false - don't auto-create infrastructure).
+	EnableMessageOrdering       bool `mapstructure:"enable_message_ordering"`
 	CreateTopicIfMissing        bool `mapstructure:"create_topic_if_missing"`
 	CreateSubscriptionIfMissing bool `mapstructure:"create_subscription_if_missing"`
 }
@@ -121,12 +115,18 @@ func newGooglePubSubPublisher(cfg *config, logger watermill.LoggerAdapter) (mess
 }
 
 // ensureDeadLetterTopicExists creates the dead letter topic if it doesn't exist
-func ensureDeadLetterTopicExists(ctx context.Context, projectID, topicName string, logger watermill.LoggerAdapter) error {
+func ensureDeadLetterTopicExists(
+	ctx context.Context, projectID, topicName string, logger watermill.LoggerAdapter,
+) error {
 	client, err := pubsub.NewClient(ctx, projectID)
 	if err != nil {
 		return fmt.Errorf("failed to create pubsub client: %w", err)
 	}
-	defer func() { _ = client.Close() }()
+	defer func() {
+		if closeErr := client.Close(); closeErr != nil {
+			logger.Error("failed to close dead letter topic client", closeErr, nil)
+		}
+	}()
 
 	fullyQualifiedName := fmt.Sprintf("projects/%s/topics/%s", projectID, topicName)
 
@@ -177,7 +177,9 @@ func ensureDeadLetterTopicExists(ctx context.Context, projectID, topicName strin
 }
 
 // newGooglePubSubSubscriber creates a Google Pub/Sub subscriber
-func newGooglePubSubSubscriber(cfg *config, logger watermill.LoggerAdapter, subscriptionID string) (message.Subscriber, error) {
+func newGooglePubSubSubscriber(
+	cfg *config, logger watermill.LoggerAdapter, subscriptionID string,
+) (message.Subscriber, error) {
 	gps := cfg.Broker.GooglePubSub
 
 	// If dead letter topic is configured and we're allowed to create topics, ensure it exists
@@ -196,8 +198,9 @@ func newGooglePubSubSubscriber(cfg *config, logger watermill.LoggerAdapter, subs
 		GenerateSubscriptionName: func(topic string) string {
 			return subscriptionID
 		},
-		DoNotCreateTopicIfMissing:        !gps.CreateTopicIfMissing,        // Invert: our positive flag -> watermill's negative flag
-		DoNotCreateSubscriptionIfMissing: !gps.CreateSubscriptionIfMissing, // Invert: our positive flag -> watermill's negative flag
+		// Invert our positive flags to Watermill's negative flags.
+		DoNotCreateTopicIfMissing:        !gps.CreateTopicIfMissing,
+		DoNotCreateSubscriptionIfMissing: !gps.CreateSubscriptionIfMissing,
 	}
 
 	// Set ReceiveSettings for client-side flow control
@@ -331,33 +334,32 @@ func validateGooglePubSubConfig(cfg *config) error {
 	}
 
 	// Validate RetryMinBackoff format if provided
+	var minBackoff, maxBackoff time.Duration
 	if gps.RetryMinBackoff != "" {
-		d, err := parseGoogleCloudDuration(gps.RetryMinBackoff)
+		minBackoff, err = parseGoogleCloudDuration(gps.RetryMinBackoff)
 		if err != nil {
 			return fmt.Errorf("googlepubsub.retry_min_backoff: %w", err)
 		}
 		// Must be between 0 and 600 seconds
-		if d < 0 || d > 600*time.Second {
+		if minBackoff < 0 || minBackoff > 600*time.Second {
 			return fmt.Errorf("googlepubsub.retry_min_backoff must be between 0s and 600s")
 		}
 	}
 
 	// Validate RetryMaxBackoff format if provided
 	if gps.RetryMaxBackoff != "" {
-		d, err := parseGoogleCloudDuration(gps.RetryMaxBackoff)
+		maxBackoff, err = parseGoogleCloudDuration(gps.RetryMaxBackoff)
 		if err != nil {
 			return fmt.Errorf("googlepubsub.retry_max_backoff: %w", err)
 		}
 		// Must be between 0 and 600 seconds
-		if d < 0 || d > 600*time.Second {
+		if maxBackoff < 0 || maxBackoff > 600*time.Second {
 			return fmt.Errorf("googlepubsub.retry_max_backoff must be between 0s and 600s")
 		}
 	}
 
 	// Validate retry backoff relationship (min <= max)
 	if gps.RetryMinBackoff != "" && gps.RetryMaxBackoff != "" {
-		minBackoff, _ := parseGoogleCloudDuration(gps.RetryMinBackoff)
-		maxBackoff, _ := parseGoogleCloudDuration(gps.RetryMaxBackoff)
 		if minBackoff > maxBackoff {
 			return fmt.Errorf("googlepubsub.retry_min_backoff must be less than or equal to retry_max_backoff")
 		}

@@ -14,10 +14,10 @@ import (
 
 func TestMessageToEvent(t *testing.T) {
 	tests := []struct {
-		name        string
 		setupMsg    func() *message.Message
-		expectError bool
 		validate    func(*testing.T, *event.Event)
+		name        string
+		expectError bool
 	}{
 		{
 			name: "valid message with all attributes",
@@ -74,7 +74,8 @@ func TestMessageToEvent(t *testing.T) {
 				msg := message.NewMessage("test-uuid", []byte{})
 				return msg
 			},
-			expectError: true, // unmarshal empty bytes usually fails or returns empty struct which might be invalid CloudEvent if required fields missing
+			// Empty input fails to unmarshal or produces an invalid event with missing required fields.
+			expectError: true,
 			validate:    nil,
 		},
 	}
@@ -99,10 +100,10 @@ func TestMessageToEvent(t *testing.T) {
 
 func TestEventToMessage(t *testing.T) {
 	tests := []struct {
-		name        string
 		setupEvent  func() *event.Event
-		expectError bool
 		validate    func(*testing.T, *message.Message)
+		name        string
+		expectError bool
 	}{
 		{
 			name: "valid event with all attributes",

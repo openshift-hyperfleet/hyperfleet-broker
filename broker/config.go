@@ -11,9 +11,9 @@ import (
 
 // config holds the broker configuration
 type config struct {
-	LogConfig  bool             `mapstructure:"log_config"`
 	Broker     brokerConfig     `mapstructure:"broker"`
 	Subscriber subscriberConfig `mapstructure:"subscriber"`
+	LogConfig  bool             `mapstructure:"log_config"`
 }
 
 // brokerConfig holds broker-specific configuration
@@ -134,9 +134,9 @@ func buildConfigFromMap(configMap map[string]string) (*config, error) {
 // validateConfig validates the configuration based on the broker type
 func validateConfig(cfg *config) error {
 	switch cfg.Broker.Type {
-	case "rabbitmq":
+	case brokerTypeRabbitMQ:
 		return validateRabbitMQConfig(cfg)
-	case "googlepubsub":
+	case brokerTypeGooglePubSub:
 		return validateGooglePubSubConfig(cfg)
 	default:
 		return fmt.Errorf("unsupported broker type: %s", cfg.Broker.Type)
