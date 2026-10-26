@@ -124,6 +124,8 @@ func ensureDeadLetterTopicExists(
 	}
 	defer func() {
 		if closeErr := client.Close(); closeErr != nil {
+			// Cleanup of this temporary admin client is intentionally non-fatal:
+			// it does not change the topic operation's result or the subscriber's separate client.
 			logger.Error("failed to close dead letter topic client", closeErr, nil)
 		}
 	}()
