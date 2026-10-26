@@ -22,6 +22,7 @@ type brokerConfig struct {
 	RabbitMQ     rabbitMQConfig     `mapstructure:"rabbitmq"`
 	GooglePubSub googlePubSubConfig `mapstructure:"googlepubsub"`
 	River        riverConfig        `mapstructure:"river"`
+	EventLog     eventLogConfig     `mapstructure:"eventlog"`
 }
 
 // subscriberConfig holds subscriber-specific configuration
@@ -141,6 +142,8 @@ func validateConfig(cfg *config) error {
 		return validateGooglePubSubConfig(cfg)
 	case "river":
 		return validateRiverConfig(cfg)
+	case "eventlog":
+		return validateEventLogConfig(cfg)
 	default:
 		return fmt.Errorf("unsupported broker type: %s", cfg.Broker.Type)
 	}

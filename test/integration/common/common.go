@@ -98,6 +98,20 @@ func BuildConfigMap(brokerType string, url string, pubsubProjectID string) map[s
 		// ceiling so redistribution scenarios converge within test timeouts.
 		configMap["broker.river.retry_backoff"] = "200ms"
 		configMap["broker.river.max_attempts"] = "50"
+	case "eventlog":
+		configMap["broker.eventlog.dsn"] = url
+		configMap["broker.eventlog.create_schema_if_missing"] = "true"
+		// Test-tuned convergence: fast polls so competing subscribers
+		// interleave, one event per range so distribution matches River's
+		// per-job fetch granularity, short backoff and a high attempt
+		// ceiling so error redistribution converges within test timeouts.
+		configMap["broker.eventlog.poll_interval"] = "100ms"
+		configMap["broker.eventlog.fetch_cooldown"] = "100ms"
+		configMap["broker.eventlog.batch_size"] = "1"
+		configMap["broker.eventlog.grace_period"] = "1s"
+		configMap["broker.eventlog.lease_duration"] = "30s"
+		configMap["broker.eventlog.max_attempts"] = "50"
+		configMap["broker.eventlog.retry_backoff"] = "200ms"
 	}
 	return configMap
 }

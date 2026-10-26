@@ -1,5 +1,5 @@
-// Command loadgen drives load through the River broker backend and reports
-// end-to-end delivery latency.
+// Command loadgen drives load through a Postgres broker backend (river or
+// eventlog) and reports end-to-end delivery latency.
 //
 // It publishes CloudEvents at a fixed rate to a topic while N subscribers
 // (distinct subscription IDs, so every event fans out N ways) record the
@@ -68,19 +68,33 @@ func (r *latencyRecorder) percentiles() (p50, p95, p99, max time.Duration) {
 	return at(0.50), at(0.95), at(0.99), sorted[len(sorted)-1]
 }
 
-func buildConfigMap(dsn string, parallelism int, fetchCooldown time.Duration) map[string]string {
-	return map[string]string{
-		"broker.type":                           "river",
-		"broker.river.dsn":                      dsn,
-		"broker.river.create_schema_if_missing": "true",
-		"broker.river.fetch_cooldown":           fetchCooldown.String(),
-		"subscriber.parallelism":                fmt.Sprintf("%d", parallelism),
+func buildConfigMap(backend, dsn string, parallelism int, fetchCooldown time.Duration) map[string]string {
+	parallelismStr := fmt.Sprintf("%d", parallelism)
+	switch backend {
+	case "eventlog":
+		return map[string]string{
+			"broker.type":         "eventlog",
+			"broker.eventlog.dsn": dsn,
+			"broker.eventlog.create_schema_if_missing": "true",
+			"broker.eventlog.fetch_cooldown":           fetchCooldown.String(),
+			"broker.eventlog.batch_size":               "10",
+			"subscriber.parallelism":                   parallelismStr,
+		}
+	default: // river
+		return map[string]string{
+			"broker.type":                           "river",
+			"broker.river.dsn":                      dsn,
+			"broker.river.create_schema_if_missing": "true",
+			"broker.river.fetch_cooldown":           fetchCooldown.String(),
+			"subscriber.parallelism":                parallelismStr,
+		}
 	}
 }
 
 func main() {
 	var (
 		mode        = flag.String("mode", "both", "publish, subscribe, or both")
+		backend     = flag.String("backend", "river", "broker backend: river or eventlog")
 		dsn         = flag.String("dsn", "", "Postgres DSN (postgres://...)")
 		topic       = flag.String("topic", "load-topic", "topic to publish/subscribe on")
 		rate        = flag.Int("rate", 100, "events per second to publish")
@@ -88,10 +102,10 @@ func main() {
 		subs        = flag.Int("subs", 3, "number of fan-out subscriptions")
 		parallelism = flag.Int("parallelism", 4, "workers per subscriber")
 		drain       = flag.Duration("drain", 30*time.Second, "max wait for deliveries after publishing ends")
-		// FetchCooldown is the per-queue throughput governor: each subscriber
-		// fetches at most every cooldown, so its ceiling is roughly
-		// parallelism jobs per cooldown interval.
-		fetchCooldown = flag.Duration("fetch-cooldown", 10*time.Millisecond, "river fetch cooldown per subscriber")
+		// FetchCooldown is the per-subscriber throughput governor: each
+		// subscriber fetches at most every cooldown, so its ceiling is
+		// roughly parallelism batches per cooldown interval.
+		fetchCooldown = flag.Duration("fetch-cooldown", 10*time.Millisecond, "per-subscriber fetch cooldown")
 	)
 	flag.Parse()
 
@@ -104,7 +118,7 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	configMap := buildConfigMap(*dsn, *parallelism, *fetchCooldown)
+	configMap := buildConfigMap(*backend, *dsn, *parallelism, *fetchCooldown)
 
 	// Subscribers first so the registry rows exist before publishing starts.
 	recorders := make([]*latencyRecorder, 0, *subs)

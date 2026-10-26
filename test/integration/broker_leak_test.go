@@ -188,6 +188,8 @@ func setupBrokerTest(t *testing.T, cfg brokerTestConfig) map[string]string {
 		configMap = common.BuildConfigMap("googlepubsub", "", sharedPubSubProjectID)
 	case "river":
 		configMap = common.BuildConfigMap("river", sharedRiverDSN, "")
+	case "eventlog":
+		configMap = common.BuildConfigMap("eventlog", sharedRiverDSN, "")
 	default:
 		t.Fatalf("unsupported broker type: %s", cfg.brokerType)
 	}
@@ -387,6 +389,28 @@ func TestRiverGoroutineLeak(t *testing.T) {
 func TestRiverLeakIncreasesWithUsage(t *testing.T) {
 	testLeakIncreasesWithUsage(t, brokerTestConfig{
 		brokerType:     "river",
+		setupSleep:     500 * time.Millisecond,
+		receiveTimeout: 10 * time.Second,
+		leakTolerance:  4,
+	})
+}
+
+// TestEventLogGoroutineLeak tests goroutine leak with the event log backend
+func TestEventLogGoroutineLeak(t *testing.T) {
+	testGoroutineLeak(t, brokerTestConfig{
+		brokerType:     "eventlog",
+		setupSleep:     500 * time.Millisecond,
+		receiveTimeout: 10 * time.Second,
+		// pgx pool health-check goroutines take a moment to wind down
+		// after Close(); allow a small tolerance.
+		leakTolerance: 4,
+	})
+}
+
+// TestEventLogLeakIncreasesWithUsage verifies goroutine cleanup scales with subscription count using the event log backend
+func TestEventLogLeakIncreasesWithUsage(t *testing.T) {
+	testLeakIncreasesWithUsage(t, brokerTestConfig{
+		brokerType:     "eventlog",
 		setupSleep:     500 * time.Millisecond,
 		receiveTimeout: 10 * time.Second,
 		leakTolerance:  4,

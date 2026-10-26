@@ -93,6 +93,9 @@ func NewPublisher(log logger.Logger, metrics *MetricsRecorder, configMap ...map[
 	case "river":
 		// The River backend implements Publisher natively (no Watermill).
 		return newRiverPublisher(cfg, log, metrics)
+	case "eventlog":
+		// The event log backend implements Publisher natively (no Watermill).
+		return newEventLogPublisher(cfg, log, metrics)
 	default:
 		return nil, fmt.Errorf("unsupported broker type: %s", cfg.Broker.Type)
 	}
@@ -165,6 +168,9 @@ func NewSubscriber(log logger.Logger, subscriptionID string, metrics *MetricsRec
 	case "river":
 		// The River backend implements Subscriber natively (no Watermill).
 		return newRiverSubscriber(cfg, log, subscriptionID, metrics)
+	case "eventlog":
+		// The event log backend implements Subscriber natively (no Watermill).
+		return newEventLogSubscriber(cfg, log, subscriptionID, metrics)
 	default:
 		return nil, fmt.Errorf("unsupported broker type: %s", cfg.Broker.Type)
 	}
@@ -193,6 +199,9 @@ func logConfiguration(cfg *config, component string, logger watermill.LoggerAdap
 	}
 	if cfg.Broker.Type == "river" && cfg.Broker.River.DSN != "" {
 		logCfg.Broker.River.DSN = maskPassword(cfg.Broker.River.DSN)
+	}
+	if cfg.Broker.Type == "eventlog" && cfg.Broker.EventLog.DSN != "" {
+		logCfg.Broker.EventLog.DSN = maskPassword(cfg.Broker.EventLog.DSN)
 	}
 
 	// Marshal to JSON with indentation
