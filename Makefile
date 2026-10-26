@@ -19,7 +19,8 @@ verify-tools: tools ## Fail in CI if tool module drifted
 
 # Format code
 fmt:
-	gofmt -s -w .
+	$(call gotool,golangci-lint) fmt ./...
+	cd example && "$(GO)" tool -modfile="$(abspath $(TOOL_MOD))" golangci-lint fmt --config=../.golangci.yml ./...
 
 # Alias for fmt (required by hyperfleet-hooks)
 gofmt: fmt
