@@ -101,9 +101,12 @@ cooldown 10ms; repeat run on a fresh instance):
 
 Zero publish errors in every run. The event log's
 median is about 5x lower than River's (no queue round trip); River's tail
-is about 2x tighter (LISTEN/NOTIFY push versus batch polling), and every
+is about 2x tighter (LISTEN/NOTIFY push versus idle-poll wait), and every
 figure is within a few percent across repeat runs. The event log's p99 is
-insensitive to the fetch cooldown (211ms at 5ms and at 10ms). River at
+set by the idle `poll_interval` (1s default; the harness does not override
+it): at 200ms the p99 drops to 16ms but costs 34 percent more transaction
+IDs and 38 percent more WAL, so 1s stands against the 5-second Sentinel
+poll floor. River at
 parallelism 4 starves at 500 events/sec (p50 in seconds), so the
 comparison uses the harness's parallelism-8 shape throughout.
 
@@ -144,9 +147,11 @@ rotation and near-zero vacuum load; per-subscription consumer lag in one
 SQL query; the same table becomes an API-emitted outbox by changing the
 producer; transaction-pooling safe with no LISTEN/NOTIFY.
 
-Costs: a polling latency tail (p99 about 200ms at the tested knobs,
-insensitive to the fetch cooldown, max under 500ms) where River pushes via LISTEN/NOTIFY; per-topic publish
+Costs: a polling latency tail set by the idle `poll_interval` (1s default;
+p99 about 200ms, drops to 16ms at 200ms interval but costs 34 percent more
+transaction IDs and 38 percent more WAL) where River pushes via LISTEN/NOTIFY; per-topic publish
 serialization on the counter row (irrelevant at the contract's tens of
 events per second); range coordination adds two small tables and one
-transaction per batch; no built-in UI or retry tooling — metrics wire into
+transaction per batch; idle polls take a cursor row lock (implementation
+story: read before locking); no built-in UI or retry tooling — metrics wire into
 the existing `MetricsRecorder`, everything else is SQL.
