@@ -59,6 +59,8 @@ at roughly `batch_size` events per cooldown. The 100ms default gives about
 
 ## How to test
 
+Requires a running Docker or Podman daemon (the integration tests start Postgres and PgBouncer containers).
+
 ```bash
 make test                # unit: config validation, defaults, partition naming
 make test-integration    # nine scenarios, leak tests, and the targeted tests
@@ -68,6 +70,20 @@ go run ./poc/river-pipeline/loadgen \
   -backend eventlog \
   -dsn postgres://broker:broker@localhost:5432/broker?sslmode=disable \
   -rate 500 -duration 30s -subs 5 -parallelism 4
+```
+
+For the in-kind numbers, create a kind cluster and deploy the postgres manifest:
+
+```bash
+kind create cluster --name eventlog-poc --wait 60s
+kubectl create namespace hyperfleet
+kubectl -n hyperfleet apply -f poc/river-pipeline/manifests/postgres.yaml
+kubectl -n hyperfleet port-forward svc/river-postgres 15432:5432 &
+go run ./poc/river-pipeline/loadgen \
+  -backend eventlog \
+  -dsn postgres://broker:broker@localhost:15432/broker?sslmode=disable \
+  -rate 200 -duration 30s -subs 3 -parallelism 8
+kind delete cluster --name eventlog-poc
 ```
 
 ## Measured
