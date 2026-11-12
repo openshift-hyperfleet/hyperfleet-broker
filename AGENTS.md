@@ -1,6 +1,6 @@
 # AGENTS.md — hyperfleet-broker
 
-Go library: unified pub/sub API over RabbitMQ and Google Pub/Sub with CloudEvents. Not a binary — consumed as a dependency by other HyperFleet services. Wraps [Watermill](https://github.com/ThreeDotsLabs/watermill) internally; public API never exposes Watermill types.
+Go library: unified pub/sub API over RabbitMQ, Google Pub/Sub, and PostgreSQL with CloudEvents. Not a binary — consumed as a dependency by other HyperFleet services. RabbitMQ and Google Pub/Sub wrap [Watermill](https://github.com/ThreeDotsLabs/watermill) internally; the PostgreSQL event log backend (`broker.type: postgres`) implements the seam natively. Public API never exposes Watermill types.
 
 ## Verification
 
@@ -22,13 +22,14 @@ Go library: unified pub/sub API over RabbitMQ and Google Pub/Sub with CloudEvent
 |-------|----------|
 | Public API | `broker/broker.go`, `broker/publisher.go`, `broker/subscriber.go`, `broker/metrics.go`, `broker/errors.go` |
 | Watermill logger adapter | `broker/internal/watermilladapter/adapter.go` |
-| Config structure + validation | `broker/config.go`, `broker/rabbitmq.go`, `broker/googlepubsub.go` |
+| Config structure + validation | `broker/config.go`, `broker/rabbitmq.go`, `broker/googlepubsub.go`, `broker/eventlog.go` |
 | Config fields reference | `example/broker.example.yaml` |
-| Integration test helpers | `test/integration/testutil/testutil.go` |
+| Integration test helpers | `test/integration/testutil/testutil.go`, `test/integration/testutil/postgres.go` |
+| Event log schema fixture | `test/integration/testutil/schema.sql` (shared by the eventlog suite and the leak test; production schema comes from the `event_store` migrations) |
 | Container setup helpers | `test/integration/rabbitmq/setup.go`, `test/integration/googlepubsub/setup.go` |
 | Leak & perf integration tests | `test/integration/broker_leak_test.go`, `test/integration/broker_perf_test.go` |
 | Examples (separate go.mod) | `example/go.mod`, `example/cmd/publisher/main.go`, `example/cmd/subscriber/main.go` |
-| Docker Compose examples | `example/rabbitmq/`, `example/googlepubsub/` |
+| Docker Compose examples | `example/rabbitmq/`, `example/googlepubsub/`, `example/postgres/` |
 | Comprehensive user docs | `README.md` |
 | Logging standard | [HyperFleet logging specification](https://github.com/openshift-hyperfleet/architecture/blob/main/hyperfleet/standards/logging-specification.md) |
 
@@ -36,9 +37,9 @@ Go library: unified pub/sub API over RabbitMQ and Google Pub/Sub with CloudEvent
 
 Only patterns an agent cannot infer from reading the code:
 
-- **Subscription ID** controls messaging pattern: same ID = shared/load-balanced queue, different IDs = fanout. RabbitMQ queue name = `{topic}-{subscriptionID}` (default) or `{queue}-{subscriptionID}` when `broker.rabbitmq.queue` is set. Google Pub/Sub subscription name = `{subscriptionID}`.
+- **Subscription ID** controls messaging pattern: same ID = shared/load-balanced queue, different IDs = fanout. RabbitMQ queue name = `{topic}-{subscriptionID}` (default) or `{queue}-{subscriptionID}` when `broker.rabbitmq.queue` is set. Google Pub/Sub subscription name = `{subscriptionID}`. PostgreSQL realizes both with one cursor row per (topic, subscription ID); same-ID replicas reserve disjoint sequence ranges.
 - **Config precedence**: programmatic map > env vars > broker.yaml file > defaults. `BROKER_CONFIG_FILE` env var overrides file path. Env vars use underscore for dots (e.g., `BROKER_RABBITMQ_URL`).
-- **Health check asymmetry**: RabbitMQ = in-memory connection state check (no network call). Google Pub/Sub = `GetTopic` API probe with 3s timeout on a non-existent topic; `NotFound` = healthy.
+- **Health check asymmetry**: RabbitMQ = in-memory connection state check (no network call). Google Pub/Sub = `GetTopic` API probe with 3s timeout on a non-existent topic; `NotFound` = healthy. PostgreSQL = pgx pool ping, bounded at 5s when the caller's context has no deadline.
 - **Config debugging**: `log_config: true` in broker.yaml (or `LOG_CONFIG=true`) logs full config as JSON at creation time. Passwords masked.
 - **DLQ topic naming**: DLQ topic is always `{subscriptionID}-dlq` (hardcoded at `googlepubsub.go`). Not configurable.
 
@@ -51,12 +52,13 @@ Only patterns an agent cannot infer from reading the code:
 
 ### DON'T
 
-- Don't add a third broker backend without updating `validateConfig`, both constructors, health checks, and integration test infrastructure
+- Don't add a new broker backend without updating `validateConfig`, both constructors, health checks, and integration test infrastructure
 
 ## Gotchas
 
 - **Google Pub/Sub health check requires `pubsub.topics.get`** — NOT included in `roles/pubsub.publisher`. Grant `roles/pubsub.viewer` or custom role.
-- **`subscriber.parallelism` > 1 only needed for RabbitMQ**. Google Pub/Sub handles parallelism internally via `num_goroutines` and `max_outstanding_messages`.
+- **`subscriber.parallelism` > 1 needed for RabbitMQ and PostgreSQL**. PostgreSQL spawns that many range workers per topic; Google Pub/Sub handles parallelism internally via `num_goroutines` and `max_outstanding_messages`.
+- **PostgreSQL backend diverges on repeat Subscribe**: one handler per topic per subscriber instance — a second `Subscribe` to the same topic errors, while the Watermill backends register another competing handler. Documented on the `Subscriber` interface.
 - **Integration tests run sequentially** (`-p 1`) because CI has 1 CPU. Parallel execution causes timeouts.
 - **`example/` has its own `go.mod`** — `make test` from root does not test examples. Update `example/go.mod` when changing public API.
 - **`error_test.go` "missing rabbitmq url" test**: correctly asserts `expectError: true` since `validateRabbitMQConfig` rejects empty URLs at creation time.

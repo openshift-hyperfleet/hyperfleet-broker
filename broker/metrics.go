@@ -34,24 +34,24 @@ func NewMetricsRecorder(component, version string, registerer prometheus.Registe
 		messagesConsumed: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "hyperfleet_broker_messages_consumed_total",
 			Help: "Total number of messages consumed from the broker.",
-		}, []string{"topic", "component", "version"}),
+		}, []string{"topic", "broker_type", "component", "version"}),
 
 		messagesPublished: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "hyperfleet_broker_messages_published_total",
 			Help: "Total number of messages published to the broker.",
-		}, []string{"topic", "component", "version"}),
+		}, []string{"topic", "broker_type", "component", "version"}),
 
 		errors: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "hyperfleet_broker_errors_total",
 			Help: "Total number of message processing errors.",
-		}, []string{"topic", "error_type", "component", "version"}),
+		}, []string{"topic", "broker_type", "error_type", "component", "version"}),
 
 		messageDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name: "hyperfleet_broker_message_duration_seconds",
 			Help: "Duration of message processing in seconds.",
 			// Event processing buckets per HyperFleet Metrics Standard
 			Buckets: []float64{0.1, 0.5, 1, 2, 5, 10, 30, 60, 120},
-		}, []string{"topic", "component", "version"}),
+		}, []string{"topic", "broker_type", "component", "version"}),
 	}
 
 	registerer.MustRegister(
@@ -64,22 +64,26 @@ func NewMetricsRecorder(component, version string, registerer prometheus.Registe
 	return m
 }
 
-// RecordConsumed increments the messages consumed counter for the given topic.
-func (m *MetricsRecorder) RecordConsumed(topic string) {
-	m.messagesConsumed.WithLabelValues(topic, m.component, m.version).Inc()
+// RecordConsumed increments the messages consumed counter for the given
+// topic and broker type.
+func (m *MetricsRecorder) RecordConsumed(topic, brokerType string) {
+	m.messagesConsumed.WithLabelValues(topic, brokerType, m.component, m.version).Inc()
 }
 
-// RecordPublished increments the messages published counter for the given topic.
-func (m *MetricsRecorder) RecordPublished(topic string) {
-	m.messagesPublished.WithLabelValues(topic, m.component, m.version).Inc()
+// RecordPublished increments the messages published counter for the given
+// topic and broker type.
+func (m *MetricsRecorder) RecordPublished(topic, brokerType string) {
+	m.messagesPublished.WithLabelValues(topic, brokerType, m.component, m.version).Inc()
 }
 
-// RecordError increments the errors counter for the given topic and error type.
-func (m *MetricsRecorder) RecordError(topic, errorType string) {
-	m.errors.WithLabelValues(topic, errorType, m.component, m.version).Inc()
+// RecordError increments the errors counter for the given topic, broker
+// type, and error type.
+func (m *MetricsRecorder) RecordError(topic, brokerType, errorType string) {
+	m.errors.WithLabelValues(topic, brokerType, errorType, m.component, m.version).Inc()
 }
 
-// RecordDuration observes the message processing duration for the given topic.
-func (m *MetricsRecorder) RecordDuration(topic string, duration time.Duration) {
-	m.messageDuration.WithLabelValues(topic, m.component, m.version).Observe(duration.Seconds())
+// RecordDuration observes the message processing duration for the given
+// topic and broker type.
+func (m *MetricsRecorder) RecordDuration(topic, brokerType string, duration time.Duration) {
+	m.messageDuration.WithLabelValues(topic, brokerType, m.component, m.version).Observe(duration.Seconds())
 }

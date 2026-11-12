@@ -19,7 +19,9 @@ type HandlerFunc func(ctx context.Context, event *event.Event) error
 
 // Subscriber defines the interface for subscribing to CloudEvents
 type Subscriber interface {
-	// Subscribe subscribes to a topic and processes messages with the provided handler
+	// Subscribe subscribes to a topic and processes messages with the provided handler.
+	// The postgres backend rejects a second handler for the same topic on one subscriber instance;
+	// RabbitMQ and Google Pub/Sub register additional competing handlers.
 	Subscribe(ctx context.Context, topic string, handler HandlerFunc) error
 	// Errors returns a channel that receives errors from background operations.
 	// The channel is buffered to prevent blocking the subscriber.
@@ -58,9 +60,9 @@ type subscriber struct {
 	closed bool
 }
 
-// Subscribe subscribes to a topic and processes messages with the provided handler
+// Subscribe subscribes to a topic and processes messages with the provided handler.
 // The subscriptionID stored in the subscriber struct determines whether subscribers share messages
-// (same ID = shared, different IDs = separate)
+// (same ID = shared, different IDs = separate).
 func (s *subscriber) Subscribe(ctx context.Context, topic string, handler HandlerFunc) error {
 	if handler == nil {
 		return fmt.Errorf("handler must be provided")
@@ -91,13 +93,13 @@ func (s *subscriber) Subscribe(ctx context.Context, topic string, handler Handle
 		s.logger.DebugContext(msgCtx, "received message", "topic", topic)
 
 		// Record message consumed
-		s.metrics.RecordConsumed(topic)
+		s.metrics.RecordConsumed(topic, s.brokerType)
 
 		// Convert Watermill message to CloudEvent
 		evt, err := messageToEvent(msg)
 		if err != nil {
 			s.logger.ErrorContext(msgCtx, "failed to convert message to CloudEvent", "error", err)
-			s.metrics.RecordError(topic, "conversion")
+			s.metrics.RecordError(topic, s.brokerType, "conversion")
 			// If conversion fails, we return error which triggers Nack/Retry
 			// If it's a permanent error (malformed), Retry middleware will give up after MaxRetries
 			// and message will be Nacked (or sent to PoisonQueue if configured, but here just Nacked)
@@ -108,11 +110,11 @@ func (s *subscriber) Subscribe(ctx context.Context, topic string, handler Handle
 		// IMPORTANT: Pass msg.Context() to preserve tracing/metadata
 		start := time.Now()
 		err = handler(msgCtx, evt)
-		s.metrics.RecordDuration(topic, time.Since(start))
+		s.metrics.RecordDuration(topic, s.brokerType, time.Since(start))
 
 		if err != nil {
 			s.logger.ErrorContext(msgCtx, "handler failed to process event", "error", err)
-			s.metrics.RecordError(topic, "handler")
+			s.metrics.RecordError(topic, s.brokerType, "handler")
 		} else {
 			s.logger.DebugContext(msgCtx, "successfully processed event",
 				"event_id", evt.ID(), "topic", topic, "subscription_id", s.subscriptionID)

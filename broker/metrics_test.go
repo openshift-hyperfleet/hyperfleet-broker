@@ -73,10 +73,10 @@ func matchLabels(metricLabels []*dto.LabelPair, expected map[string]string) bool
 func TestNewMetricsRecorderRegistersAllMetrics(t *testing.T) {
 	// Trigger one of each metric type so Gather() returns their families.
 	m, reg := newTestRegistry(t)
-	m.RecordConsumed("test-topic")
-	m.RecordPublished("test-topic")
-	m.RecordError("test-topic", "test-error")
-	m.RecordDuration("test-topic", 100*time.Millisecond)
+	m.RecordConsumed("test-topic", brokerTypeRabbitMQ)
+	m.RecordPublished("test-topic", brokerTypeRabbitMQ)
+	m.RecordError("test-topic", brokerTypeRabbitMQ, "test-error")
+	m.RecordDuration("test-topic", brokerTypeRabbitMQ, 100*time.Millisecond)
 
 	mfs, err := reg.Gather()
 	require.NoError(t, err)
@@ -95,11 +95,13 @@ func TestNewMetricsRecorderRegistersAllMetrics(t *testing.T) {
 func TestRecordConsumed(t *testing.T) {
 	m, reg := newTestRegistry(t)
 
-	m.RecordConsumed("orders")
-	m.RecordConsumed("orders")
-	m.RecordConsumed("events")
+	m.RecordConsumed("orders", brokerTypeRabbitMQ)
+	m.RecordConsumed("orders", brokerTypeRabbitMQ)
+	m.RecordConsumed("events", brokerTypeRabbitMQ)
 
-	labels := map[string]string{"topic": "orders", "component": "test-component", "version": "v0.1.0"}
+	labels := map[string]string{
+		"topic": "orders", "broker_type": brokerTypeRabbitMQ, "component": "test-component", "version": "v0.1.0",
+	}
 	assert.Equal(t, float64(2), getCounterValue(t, reg, "hyperfleet_broker_messages_consumed_total", labels))
 
 	labels["topic"] = "events"
@@ -109,28 +111,32 @@ func TestRecordConsumed(t *testing.T) {
 func TestRecordPublished(t *testing.T) {
 	m, reg := newTestRegistry(t)
 
-	m.RecordPublished("orders")
-	m.RecordPublished("orders")
-	m.RecordPublished("orders")
+	m.RecordPublished("orders", brokerTypeRabbitMQ)
+	m.RecordPublished("orders", brokerTypeRabbitMQ)
+	m.RecordPublished("orders", brokerTypeRabbitMQ)
 
-	labels := map[string]string{"topic": "orders", "component": "test-component", "version": "v0.1.0"}
+	labels := map[string]string{
+		"topic": "orders", "broker_type": brokerTypeRabbitMQ, "component": "test-component", "version": "v0.1.0",
+	}
 	assert.Equal(t, float64(3), getCounterValue(t, reg, "hyperfleet_broker_messages_published_total", labels))
 }
 
 func TestRecordError(t *testing.T) {
 	m, reg := newTestRegistry(t)
 
-	m.RecordError("orders", "handler")
-	m.RecordError("orders", "conversion")
-	m.RecordError("orders", "handler")
+	m.RecordError("orders", brokerTypeRabbitMQ, "handler")
+	m.RecordError("orders", brokerTypeRabbitMQ, "conversion")
+	m.RecordError("orders", brokerTypeRabbitMQ, "handler")
 
 	handlerLabels := map[string]string{
-		"topic": "orders", "error_type": "handler", "component": "test-component", "version": "v0.1.0",
+		"topic": "orders", "broker_type": brokerTypeRabbitMQ, "error_type": "handler",
+		"component": "test-component", "version": "v0.1.0",
 	}
 	assert.Equal(t, float64(2), getCounterValue(t, reg, "hyperfleet_broker_errors_total", handlerLabels))
 
 	conversionLabels := map[string]string{
-		"topic": "orders", "error_type": "conversion", "component": "test-component", "version": "v0.1.0",
+		"topic": "orders", "broker_type": brokerTypeRabbitMQ, "error_type": "conversion",
+		"component": "test-component", "version": "v0.1.0",
 	}
 	assert.Equal(t, float64(1), getCounterValue(t, reg, "hyperfleet_broker_errors_total", conversionLabels))
 }
@@ -138,10 +144,12 @@ func TestRecordError(t *testing.T) {
 func TestRecordDuration(t *testing.T) {
 	m, reg := newTestRegistry(t)
 
-	m.RecordDuration("orders", 500*time.Millisecond)
-	m.RecordDuration("orders", 1500*time.Millisecond)
+	m.RecordDuration("orders", brokerTypeRabbitMQ, 500*time.Millisecond)
+	m.RecordDuration("orders", brokerTypeRabbitMQ, 1500*time.Millisecond)
 
-	labels := map[string]string{"topic": "orders", "component": "test-component", "version": "v0.1.0"}
+	labels := map[string]string{
+		"topic": "orders", "broker_type": brokerTypeRabbitMQ, "component": "test-component", "version": "v0.1.0",
+	}
 	assert.Equal(t, uint64(2), getHistogramCount(t, reg, "hyperfleet_broker_message_duration_seconds", labels))
 }
 
@@ -151,9 +159,10 @@ func TestPublisherMetricsIntegration(t *testing.T) {
 
 	t.Run("successful publish increments published counter", func(t *testing.T) {
 		p := &publisher{
-			pub:     &fakeWatermillPublisher{},
-			logger:  discardLogger,
-			metrics: metrics,
+			pub:        &fakeWatermillPublisher{},
+			logger:     discardLogger,
+			metrics:    metrics,
+			brokerType: brokerTypeRabbitMQ,
 		}
 
 		evt := event.New()
@@ -164,15 +173,18 @@ func TestPublisherMetricsIntegration(t *testing.T) {
 		err := p.Publish(context.Background(), "test-topic", &evt)
 		assert.NoError(t, err)
 
-		labels := map[string]string{"topic": "test-topic", "component": "test-publisher", "version": "v1.0.0"}
+		labels := map[string]string{
+			"topic": "test-topic", "broker_type": brokerTypeRabbitMQ, "component": "test-publisher", "version": "v1.0.0",
+		}
 		assert.Equal(t, float64(1), getCounterValue(t, reg, "hyperfleet_broker_messages_published_total", labels))
 	})
 
 	t.Run("failed publish increments error counter", func(t *testing.T) {
 		p := &publisher{
-			pub:     &failingWatermillPublisher{},
-			logger:  discardLogger,
-			metrics: metrics,
+			pub:        &failingWatermillPublisher{},
+			logger:     discardLogger,
+			metrics:    metrics,
+			brokerType: brokerTypeRabbitMQ,
 		}
 
 		evt := event.New()
@@ -184,7 +196,8 @@ func TestPublisherMetricsIntegration(t *testing.T) {
 		assert.Error(t, err)
 
 		labels := map[string]string{
-			"topic": "fail-topic", "error_type": "publish", "component": "test-publisher", "version": "v1.0.0",
+			"topic": "fail-topic", "broker_type": brokerTypeRabbitMQ, "error_type": "publish",
+			"component": "test-publisher", "version": "v1.0.0",
 		}
 		assert.Equal(t, float64(1), getCounterValue(t, reg, "hyperfleet_broker_errors_total", labels))
 	})

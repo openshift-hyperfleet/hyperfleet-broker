@@ -1,0 +1,15 @@
+broker:
+  type: postgres
+  # All available options and their defaults: ../broker.example.yaml
+  postgres:
+    host: postgres
+    port: 5432
+    database: broker
+    user: broker
+    password: broker
+    # Container-local example connection; real deployments use verify-full
+    # with a CA bundle (ca_cert_file).
+    sslmode: disable
+
+subscriber:
+  parallelism: 10

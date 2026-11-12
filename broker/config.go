@@ -19,6 +19,7 @@ type config struct {
 // brokerConfig holds broker-specific configuration
 type brokerConfig struct {
 	Type         string             `mapstructure:"type"`
+	Postgres     postgresConfig     `mapstructure:"postgres"`
 	RabbitMQ     rabbitMQConfig     `mapstructure:"rabbitmq"`
 	GooglePubSub googlePubSubConfig `mapstructure:"googlepubsub"`
 }
@@ -138,6 +139,8 @@ func validateConfig(cfg *config) error {
 		return validateRabbitMQConfig(cfg)
 	case brokerTypeGooglePubSub:
 		return validateGooglePubSubConfig(cfg)
+	case brokerTypePostgres:
+		return validatePostgresConfig(cfg)
 	default:
 		return fmt.Errorf("unsupported broker type: %s", cfg.Broker.Type)
 	}

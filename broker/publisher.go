@@ -47,7 +47,7 @@ func (p *publisher) Publish(ctx context.Context, topic string, event *event.Even
 	msg, err := eventToMessage(event)
 	if err != nil {
 		p.logger.ErrorContext(ctx, "failed to convert CloudEvent to message", "error", err)
-		p.metrics.RecordError(topic, "conversion")
+		p.metrics.RecordError(topic, p.brokerType, "conversion")
 		return err
 	}
 
@@ -55,11 +55,11 @@ func (p *publisher) Publish(ctx context.Context, topic string, event *event.Even
 	err = p.pub.Publish(topic, msg)
 	if err != nil {
 		p.logger.ErrorContext(ctx, "failed to publish message to topic", "error", err)
-		p.metrics.RecordError(topic, "publish")
+		p.metrics.RecordError(topic, p.brokerType, "publish")
 		return err
 	}
 
-	p.metrics.RecordPublished(topic)
+	p.metrics.RecordPublished(topic, p.brokerType)
 	p.logger.DebugContext(ctx, "successfully published event", "event_id", event.ID(), "topic", topic)
 	return nil
 }

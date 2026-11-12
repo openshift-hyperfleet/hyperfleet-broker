@@ -3,7 +3,7 @@
 # You can override any setting using environment variables (e.g., BROKER_TYPE=rabbitmq)
 
 broker:
-  # Broker type: "rabbitmq" or "googlepubsub"
+  # Broker type: "rabbitmq", "googlepubsub", or "postgres"
   type: googlepubsub
 
   # RabbitMQ Configuration
@@ -69,6 +69,29 @@ broker:
     # Set to true to automatically create topics/subscriptions if they don't exist
     create_topic_if_missing: false
     create_subscription_if_missing: false
+
+  # PostgreSQL Configuration (event log backend)
+  # Discrete connection fields assembled into the DSN by the library;
+  # the schema must already exist, and sslmode has no default.
+  postgres:
+    host: postgres.database.svc
+    port: 5432
+    database: event_store
+    user: event_store_app
+    password: ""             # empty is allowed
+    sslmode: verify-full     # required: disable, require, verify-ca, or verify-full
+    ca_cert_file: /etc/pki/ca.crt
+
+    # Pool and behavior settings (defaults shown)
+    pool_max_conns: 10       # pgx connection pool size
+    poll_interval: 1s        # idle poll cadence
+    fetch_cooldown: 100ms    # pause after each range, so replicas interleave
+    batch_size: 10           # events reserved per range claim
+    grace_period: 5s         # sequence-hole wait before skipping as rolled back; must exceed the longest publish transaction
+    lease_duration: 30s      # range-claim lifetime for crash recovery
+    max_attempts: 5          # delivery attempts per (topic, subscription, sequence)
+    retry_backoff: 200ms     # released-range reclaim delay
+    retention: 24h           # event retention window
 
 # Subscriber Configuration
 subscriber:

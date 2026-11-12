@@ -1,4 +1,4 @@
-.PHONY: build rabbitmq-up rabbitmq-down rabbitmq-logs pubsub-up pubsub-down pubsub-logs clean
+.PHONY: build rabbitmq-up rabbitmq-down rabbitmq-logs pubsub-up pubsub-down pubsub-logs postgres-up postgres-down postgres-logs clean
 
 # Build all binaries locally (for testing)
 build:
@@ -25,9 +25,20 @@ pubsub-down:
 pubsub-logs:
 	cd googlepubsub && podman compose logs -f
 
+# PostgreSQL commands
+postgres-up:
+	cd postgres && podman compose up -d
+
+postgres-down:
+	cd postgres && podman compose down -v
+
+postgres-logs:
+	cd postgres && podman compose logs -f
+
 clean:
 	cd rabbitmq && podman compose down -v 2>/dev/null || true
 	cd googlepubsub && podman compose down -v 2>/dev/null || true
+	cd postgres && podman compose down -v 2>/dev/null || true
 	rm -rf bin/
 	rm -f broker.yaml
 

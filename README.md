@@ -1,13 +1,13 @@
 # Hyperfleet Broker Library
 
-A Go library that provides a simplified abstraction layer over for pub/sub messaging with built-in CloudEvents support. The library supports multiple message brokers (RabbitMQ and Google Pub/Sub) through a unified API, making it easy to switch between brokers or develop broker-agnostic applications.
+A Go library that provides a simplified abstraction layer for pub/sub messaging with built-in CloudEvents support. The library supports multiple message brokers (RabbitMQ, Google Pub/Sub, and PostgreSQL) through a unified API, making it easy to switch between brokers or develop broker-agnostic applications.
 
-The current implementation uses [Watermill](https://github.com/ThreeDotsLabs/watermill), but it is abstracted from users.
+The RabbitMQ and Google Pub/Sub backends use [Watermill](https://github.com/ThreeDotsLabs/watermill); the PostgreSQL event log backend implements the seam natively. Both are abstracted from users.
 
 
 ## Features
 
-- **Multiple Broker Support**: Works with RabbitMQ and Google Pub/Sub out of the box
+- **Multiple Broker Support**: Works with RabbitMQ, Google Pub/Sub, and PostgreSQL out of the box
 - **CloudEvents Integration**: Built-in support for CloudEvents format with automatic conversion
 - **Logger Integration**: Uses Go's standard `log/slog` - pass any `*slog.Logger`
 - **Flexible Configuration**: YAML configuration files with environment variable overrides via Viper
@@ -116,6 +116,7 @@ if err := publisher.Health(ctx); err != nil {
 
 The health check implementation varies by broker:
 - **RabbitMQ**: Checks if the AMQP connection is open and not closed (in-memory, no network call)
+- **PostgreSQL**: Pings the pgx connection pool (bounded at 5s when the caller's context has no deadline)
 - **Google Pub/Sub**: Performs a lightweight `GetTopic` API call (3s timeout) on a non-existent probe topic to verify connectivity. A `NotFound` response confirms the round-trip succeeded. Requires the `pubsub.topics.get` permission, which is **not** included in `roles/pubsub.publisher`. You must grant an additional role such as `roles/pubsub.viewer`, `roles/pubsub.editor`, or a custom role containing `pubsub.topics.get`.
 
 <details>
@@ -197,7 +198,7 @@ The library uses a `broker.yaml` configuration file that can be placed in:
 
 ```yaml
 broker:
-  # Broker type: "rabbitmq" or "googlepubsub"
+  # Broker type: "rabbitmq", "googlepubsub", or "postgres"
   type: rabbitmq
 
   # RabbitMQ Configuration
@@ -206,6 +207,25 @@ broker:
     exchange_type: topic
     prefetch_count: 10
     publisher_confirm: false
+
+  # PostgreSQL Configuration (event log backend)
+  postgres:
+    host: postgres.database.svc
+    port: 5432
+    database: event_store
+    user: event_store_app
+    password: ""
+    sslmode: verify-full
+    ca_cert_file: /etc/pki/ca.crt
+    pool_max_conns: 10
+    poll_interval: 1s
+    fetch_cooldown: 100ms
+    batch_size: 10
+    grace_period: 5s
+    lease_duration: 30s
+    max_attempts: 5
+    retry_backoff: 200ms
+    retention: 24h
 
   # Google Pub/Sub Configuration
   googlepubsub:
@@ -295,16 +315,54 @@ With RabbitMQ (AMQP protocol), exchanges and queues are **always declared automa
 - **RabbitMQ**: Infrastructure (exchanges, queues) is always auto-created—no configuration needed
 - *
 
+#### PostgreSQL configuration (event log backend)
+
+The `postgres` broker type stores events in an append-only `broker_events` table with a per-topic sequence and a cursor per (topic, subscription): fan-out is independent cursor advancement, and competing consumers reserve disjoint sequence ranges.
+
+A PostgreSQL subscriber accepts one handler per topic per instance; a second `Subscribe` for the same topic returns an error. RabbitMQ and Google Pub/Sub subscribers register additional competing handlers.
+
+Connection settings are discrete fields assembled into the DSN by the library:
+
+- **`broker.postgres.host`** (required): PostgreSQL host
+- **`broker.postgres.port`** (default: `5432`)
+- **`broker.postgres.database`** (required): database name (typically `event_store`)
+- **`broker.postgres.user`** (required) / **`broker.postgres.password`**: credentials (an empty password is allowed)
+- **`broker.postgres.sslmode`** (required, no default): one of `disable`, `require`, `verify-ca`, `verify-full`
+- **`broker.postgres.ca_cert_file`**: path to the CA bundle, sent as `sslrootcert` when set
+
+Behavior settings:
+
+- **`broker.postgres.pool_max_conns`** (default: `10`): pgx connection pool size
+- **`broker.postgres.poll_interval`** (default: `1s`): idle poll cadence
+- **`broker.postgres.fetch_cooldown`** (default: `100ms`): pause after finishing a range, so replicas sharing a subscription interleave
+- **`broker.postgres.batch_size`** (default: `10`): events reserved per range claim
+- **`broker.postgres.grace_period`** (default: `5s`): how long a sequence hole waits before being skipped as a rolled-back insert; must exceed the longest publish transaction, or the guard can skip an in-flight event
+- **`broker.postgres.lease_duration`** (default: `30s`): range-claim lifetime for crash recovery
+- **`broker.postgres.max_attempts`** (default: `5`): delivery attempts per (topic, subscription, sequence) before the event is skipped for that subscription
+- **`broker.postgres.retry_backoff`** (default: `200ms`): released-range reclaim delay
+- **`broker.postgres.retention`** (default: `24h`): how long events are kept; older daily partitions are dropped by the maintenance routine
+
+**Schema prerequisite:** the backend issues no DDL itself — the schema and the `broker_maintenance` routine must exist before startup (the schema comes from the `event_store` migration artifacts); partition pre-creation and rotation run through that routine, invoked by the backend's retention reaper.
+
+**Consumer lag** is observable in one SQL query — the topic's allocated head minus each subscription's acknowledged position:
+
+```sql
+SELECT c.topic, c.subscription_id, s.next - 1 - c.acked AS lag
+FROM broker_cursors c
+JOIN broker_topic_seq s ON s.topic = c.topic
+ORDER BY lag DESC;
+```
+
 ### Message processing parallelism
 
 Message processing parallelism is controlled by a combination of a **broker-agnostic worker pool** and **broker-specific pull settings**.
 
 The key concept for parallel processing is allowing a certain number of "in flight" messages from the broker. This means that the broker will not wait for a message to be acknoledge to deliver the next one, up to the specified number of allowed unacknowledge messages. This setting is specific per broker, and the library does not try to hide this settings from the user to make looking for help easier in case of errors.
 
-After setting the maximun number of allowed "in flight" messages, further settings are used to specify the number of parallel processes handling these messages.
+After setting the maximum number of allowed "in flight" messages, further settings are used to specify the number of parallel processes handling these messages.
 
 - **Global worker pool (`subscriber.parallelism`)**
-  - This setting is needed for watermil's implementations that do not implement their own worker pool (currently RabbitMQ)
+  - This setting is needed for implementations that do not implement their own worker pool (currently RabbitMQ); the PostgreSQL backend spawns this many range workers per topic
   - Controls how many **independent workers** are created per subscriber.
   - Each worker runs the handler in its own goroutine, allowing multiple messages to be processed at the same time.
   - Default value is **1** if not set.
@@ -455,10 +513,12 @@ subscriber, err := broker.NewSubscriber(appLogger, "my-subscription", metrics)
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
-| `hyperfleet_broker_messages_consumed_total` | Counter | `topic`, `component`, `version` | Total messages consumed from the broker |
-| `hyperfleet_broker_messages_published_total` | Counter | `topic`, `component`, `version` | Total messages published to the broker |
-| `hyperfleet_broker_errors_total` | Counter | `topic`, `error_type`, `component`, `version` | Total message processing errors |
-| `hyperfleet_broker_message_duration_seconds` | Histogram | `topic`, `component`, `version` | Duration of message handler execution |
+| `hyperfleet_broker_messages_consumed_total` | Counter | `topic`, `broker_type`, `component`, `version` | Total messages consumed from the broker |
+| `hyperfleet_broker_messages_published_total` | Counter | `topic`, `broker_type`, `component`, `version` | Total messages published to the broker |
+| `hyperfleet_broker_errors_total` | Counter | `topic`, `broker_type`, `error_type`, `component`, `version` | Total message processing errors |
+| `hyperfleet_broker_message_duration_seconds` | Histogram | `topic`, `broker_type`, `component`, `version` | Duration of message handler execution |
+
+The `broker_type` label carries the configured backend (`rabbitmq`, `googlepubsub`, or `postgres`).
 
 ### Error Types
 
@@ -478,7 +538,7 @@ The `hyperfleet_broker_message_duration_seconds` histogram uses the following bu
 
 ### 1. Watermill Abstraction
 
-The library wraps Watermill to provide a simpler, CloudEvents-focused API. This decision:
+The RabbitMQ and Google Pub/Sub backends wrap Watermill; the PostgreSQL event log backend implements the same Publisher/Subscriber seam natively. This decision:
 - **Reduces complexity**: Users don't need to understand Watermill's internals
 - **Provides consistency**: Same API regardless of underlying broker
 - **Enables broker switching**: Change brokers by updating configuration
@@ -517,7 +577,7 @@ Multiple configuration sources with clear precedence:
 
 ## Docker Compose Examples
 
-The library includes complete working examples with Docker Compose for both RabbitMQ and Google Pub/Sub.
+The library includes complete working examples with Docker Compose for RabbitMQ, Google Pub/Sub, and PostgreSQL.
 
 <details>
 <summary><strong>RabbitMQ Example</strong></summary>
@@ -560,7 +620,7 @@ docker-compose down -v
 ```
 
 **What it demonstrates:**
-- Publisher publishes CloudEvents to `example-topic` every 2 seconds
+- Publisher publishes CloudEvents to `example-topic` at a fixed interval
 - Two subscribers with the same subscription ID (`shared-subscription`) demonstrate load balancing
 - Messages are distributed between subscribers (each message goes to only one subscriber)
 
@@ -602,9 +662,59 @@ docker-compose down -v
 ```
 
 **What it demonstrates:**
-- Publisher publishes CloudEvents to `example-topic` every 2 seconds
+- Publisher publishes CloudEvents to `example-topic` at a fixed interval
 - Two subscribers with the same subscription ID share messages (load balancing)
 - Google Pub/Sub emulator provides local development environment
+
+</details>
+
+<details>
+<summary><strong>PostgreSQL Example</strong></summary>
+
+Navigate to the PostgreSQL example directory:
+
+```bash
+cd example/postgres
+```
+
+Start all services (PostgreSQL with the event log schema applied, publisher, and two subscribers):
+
+```bash
+docker-compose up -d
+# or with podman:
+podman-compose up -d
+```
+
+View logs:
+
+```bash
+# All services
+docker-compose logs -f
+
+# Specific service
+docker-compose logs -f publisher
+docker-compose logs -f subscriber1
+docker-compose logs -f subscriber2
+```
+
+Observe consumer lag directly in SQL:
+
+```bash
+docker-compose exec postgres psql -U broker -d broker -c \
+  "SELECT c.topic, c.subscription_id, s.next - 1 - c.acked AS lag FROM broker_cursors c JOIN broker_topic_seq s ON s.topic = c.topic;"
+```
+
+Stop services:
+
+```bash
+docker-compose down -v
+```
+
+**What it demonstrates:**
+- Publisher publishes CloudEvents to `example-topic` at a fixed interval
+- Two subscribers with the same subscription ID reserve disjoint sequence ranges (load balancing)
+- The event log schema (tables, index, and maintenance routine) is applied by the container's init scripts on first start; the backend itself creates no schema
+- Consumer lag is observable in one SQL query
 
 </details>
 
@@ -614,6 +724,7 @@ Each example includes a `broker.yaml` file configured for that broker:
 
 - `example/rabbitmq/broker.yaml`: RabbitMQ-specific configuration
 - `example/googlepubsub/broker.yaml`: Google Pub/Sub-specific configuration
+- `example/postgres/broker.yaml`: PostgreSQL event log configuration
 
 These files are mounted into the containers and used by the publisher and subscriber applications.
 ## References
