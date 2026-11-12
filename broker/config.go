@@ -69,6 +69,7 @@ func loadConfig() (*config, error) {
 	// Set defaults
 	v.SetDefault("log_config", false)
 	v.SetDefault("subscriber.parallelism", DefaultSubscriberParallelism)
+	v.SetDefault("broker.postgres.password", "")
 
 	// Read config file (optional - will use defaults if not found)
 	if err := v.ReadInConfig(); err != nil {
@@ -108,6 +109,7 @@ func buildConfigFromMap(configMap map[string]string) (*config, error) {
 	// Set defaults
 	v.SetDefault("log_config", false)
 	v.SetDefault("subscriber.parallelism", DefaultSubscriberParallelism)
+	v.SetDefault("broker.postgres.password", "")
 
 	// Set values from the map
 	// Viper will handle type conversion from string to int/bool during Unmarshal

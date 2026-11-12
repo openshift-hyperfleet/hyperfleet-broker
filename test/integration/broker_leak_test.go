@@ -340,9 +340,7 @@ func testLeakIncreasesWithUsage(t *testing.T, cfg brokerTestConfig) {
 
 			// Subscribe N times
 			for i := 0; i < tc.numSubscriptions; i++ {
-				if err := sub.Subscribe(ctx, fmt.Sprintf("topic-%d", i), handler); err != nil {
-					t.Logf("failed to subscribe to topic-%d: %v", i, err)
-				}
+				require.NoError(t, sub.Subscribe(ctx, fmt.Sprintf("topic-%d", i), handler))
 			}
 			time.Sleep(cfg.setupSleep)
 

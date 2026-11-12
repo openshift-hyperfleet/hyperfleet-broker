@@ -73,10 +73,10 @@ func matchLabels(metricLabels []*dto.LabelPair, expected map[string]string) bool
 func TestNewMetricsRecorderRegistersAllMetrics(t *testing.T) {
 	// Trigger one of each metric type so Gather() returns their families.
 	m, reg := newTestRegistry(t)
-	m.RecordConsumed("test-topic", brokerTypeRabbitMQ)
-	m.RecordPublished("test-topic", brokerTypeRabbitMQ)
-	m.RecordError("test-topic", brokerTypeRabbitMQ, "test-error")
-	m.RecordDuration("test-topic", brokerTypeRabbitMQ, 100*time.Millisecond)
+	m.RecordConsumedForBroker("test-topic", brokerTypeRabbitMQ)
+	m.RecordPublishedForBroker("test-topic", brokerTypeRabbitMQ)
+	m.RecordErrorForBroker("test-topic", brokerTypeRabbitMQ, "test-error")
+	m.RecordDurationForBroker("test-topic", brokerTypeRabbitMQ, 100*time.Millisecond)
 
 	mfs, err := reg.Gather()
 	require.NoError(t, err)
@@ -95,9 +95,9 @@ func TestNewMetricsRecorderRegistersAllMetrics(t *testing.T) {
 func TestRecordConsumed(t *testing.T) {
 	m, reg := newTestRegistry(t)
 
-	m.RecordConsumed("orders", brokerTypeRabbitMQ)
-	m.RecordConsumed("orders", brokerTypeRabbitMQ)
-	m.RecordConsumed("events", brokerTypeRabbitMQ)
+	m.RecordConsumedForBroker("orders", brokerTypeRabbitMQ)
+	m.RecordConsumedForBroker("orders", brokerTypeRabbitMQ)
+	m.RecordConsumedForBroker("events", brokerTypeRabbitMQ)
 
 	labels := map[string]string{
 		"topic": "orders", "broker_type": brokerTypeRabbitMQ, "component": "test-component", "version": "v0.1.0",
@@ -111,9 +111,9 @@ func TestRecordConsumed(t *testing.T) {
 func TestRecordPublished(t *testing.T) {
 	m, reg := newTestRegistry(t)
 
-	m.RecordPublished("orders", brokerTypeRabbitMQ)
-	m.RecordPublished("orders", brokerTypeRabbitMQ)
-	m.RecordPublished("orders", brokerTypeRabbitMQ)
+	m.RecordPublishedForBroker("orders", brokerTypeRabbitMQ)
+	m.RecordPublishedForBroker("orders", brokerTypeRabbitMQ)
+	m.RecordPublishedForBroker("orders", brokerTypeRabbitMQ)
 
 	labels := map[string]string{
 		"topic": "orders", "broker_type": brokerTypeRabbitMQ, "component": "test-component", "version": "v0.1.0",
@@ -124,9 +124,9 @@ func TestRecordPublished(t *testing.T) {
 func TestRecordError(t *testing.T) {
 	m, reg := newTestRegistry(t)
 
-	m.RecordError("orders", brokerTypeRabbitMQ, "handler")
-	m.RecordError("orders", brokerTypeRabbitMQ, "conversion")
-	m.RecordError("orders", brokerTypeRabbitMQ, "handler")
+	m.RecordErrorForBroker("orders", brokerTypeRabbitMQ, "handler")
+	m.RecordErrorForBroker("orders", brokerTypeRabbitMQ, "conversion")
+	m.RecordErrorForBroker("orders", brokerTypeRabbitMQ, "handler")
 
 	handlerLabels := map[string]string{
 		"topic": "orders", "broker_type": brokerTypeRabbitMQ, "error_type": "handler",
@@ -144,13 +144,35 @@ func TestRecordError(t *testing.T) {
 func TestRecordDuration(t *testing.T) {
 	m, reg := newTestRegistry(t)
 
-	m.RecordDuration("orders", brokerTypeRabbitMQ, 500*time.Millisecond)
-	m.RecordDuration("orders", brokerTypeRabbitMQ, 1500*time.Millisecond)
+	m.RecordDurationForBroker("orders", brokerTypeRabbitMQ, 500*time.Millisecond)
+	m.RecordDurationForBroker("orders", brokerTypeRabbitMQ, 1500*time.Millisecond)
 
 	labels := map[string]string{
 		"topic": "orders", "broker_type": brokerTypeRabbitMQ, "component": "test-component", "version": "v0.1.0",
 	}
 	assert.Equal(t, uint64(2), getHistogramCount(t, reg, "hyperfleet_broker_message_duration_seconds", labels))
+}
+
+func TestLegacyMetricsMethodsRemainCompatible(t *testing.T) {
+	m, reg := newTestRegistry(t)
+
+	m.RecordConsumed("orders")
+	m.RecordPublished("orders")
+	m.RecordError("orders", "handler")
+	m.RecordDuration("orders", time.Second)
+
+	labels := map[string]string{
+		"topic": "orders", "broker_type": legacyBrokerType, "component": "test-component", "version": "v0.1.0",
+	}
+	assert.Equal(t, float64(1), getCounterValue(t, reg, "hyperfleet_broker_messages_consumed_total", labels))
+	assert.Equal(t, float64(1), getCounterValue(t, reg, "hyperfleet_broker_messages_published_total", labels))
+	assert.Equal(t, uint64(1), getHistogramCount(t, reg, "hyperfleet_broker_message_duration_seconds", labels))
+
+	errorLabels := map[string]string{
+		"topic": "orders", "broker_type": legacyBrokerType, "error_type": "handler",
+		"component": "test-component", "version": "v0.1.0",
+	}
+	assert.Equal(t, float64(1), getCounterValue(t, reg, "hyperfleet_broker_errors_total", errorLabels))
 }
 
 func TestPublisherMetricsIntegration(t *testing.T) {

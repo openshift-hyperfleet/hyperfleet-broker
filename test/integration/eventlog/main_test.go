@@ -63,7 +63,7 @@ func TestMain(m *testing.M) {
 
 	pgbouncer, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: testcontainers.ContainerRequest{
-			Image:        "edoburu/pgbouncer@sha256:88769b6bbae0fbe0a198c26dc4c2f6bc3bf95bec4cab7d18c6a4348fa36cccc2",
+			Image:        "edoburu/pgbouncer@sha256:b6a9f888f4a28a6c843528b8a8bafdb46ef1921efee8672138ad35731edc7da3",
 			ExposedPorts: []string{"5432/tcp"},
 			Env: map[string]string{
 				"DB_HOST":     "eventlog-pg",
@@ -86,18 +86,21 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "failed to start pgbouncer container: %v\n", err)
 		os.Exit(1)
 	}
+	cleanupSetupFailure := func() {
+		_ = pgbouncer.Terminate(ctx) // best-effort cleanup; the process exits below
+		_ = container.Terminate(ctx) // best-effort cleanup; the process exits below
+		_ = testNetwork.Remove(ctx)  // best-effort cleanup; the process exits below
+	}
 
 	pbHost, err := pgbouncer.Host(ctx)
 	if err != nil {
-		_ = container.Terminate(ctx) // best-effort cleanup; the process exits below
-		_ = testNetwork.Remove(ctx)  // best-effort cleanup; the process exits below
+		cleanupSetupFailure()
 		fmt.Fprintf(os.Stderr, "failed to get pgbouncer host: %v\n", err)
 		os.Exit(1)
 	}
 	pbPort, err := pgbouncer.MappedPort(ctx, "5432")
 	if err != nil {
-		_ = container.Terminate(ctx) // best-effort cleanup; the process exits below
-		_ = testNetwork.Remove(ctx)  // best-effort cleanup; the process exits below
+		cleanupSetupFailure()
 		fmt.Fprintf(os.Stderr, "failed to get pgbouncer port: %v\n", err)
 		os.Exit(1)
 	}
@@ -107,8 +110,7 @@ func TestMain(m *testing.M) {
 	// The backend creates no schema: the suite applies the fixture before
 	// any test runs.
 	if err := testutil.ApplyEventLogSchema(ctx, sharedPostgresDSN); err != nil {
-		_ = container.Terminate(ctx) // best-effort cleanup; the process exits below
-		_ = testNetwork.Remove(ctx)  // best-effort cleanup; the process exits below
+		cleanupSetupFailure()
 		fmt.Fprintf(os.Stderr, "failed to apply event log schema: %v\n", err)
 		os.Exit(1)
 	}

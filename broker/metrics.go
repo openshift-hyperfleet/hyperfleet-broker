@@ -6,6 +6,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
+const legacyBrokerType = "unknown"
+
 // MetricsRecorder holds Prometheus metrics for the broker library.
 type MetricsRecorder struct {
 	messagesConsumed  *prometheus.CounterVec
@@ -64,26 +66,50 @@ func NewMetricsRecorder(component, version string, registerer prometheus.Registe
 	return m
 }
 
-// RecordConsumed increments the messages consumed counter for the given
-// topic and broker type.
-func (m *MetricsRecorder) RecordConsumed(topic, brokerType string) {
+// RecordConsumed preserves the legacy API for callers that do not provide a
+// backend label.
+func (m *MetricsRecorder) RecordConsumed(topic string) {
+	m.RecordConsumedForBroker(topic, legacyBrokerType)
+}
+
+// RecordConsumedForBroker increments the messages consumed counter for the
+// given topic and broker type.
+func (m *MetricsRecorder) RecordConsumedForBroker(topic, brokerType string) {
 	m.messagesConsumed.WithLabelValues(topic, brokerType, m.component, m.version).Inc()
 }
 
-// RecordPublished increments the messages published counter for the given
-// topic and broker type.
-func (m *MetricsRecorder) RecordPublished(topic, brokerType string) {
+// RecordPublished preserves the legacy API for callers that do not provide a
+// backend label.
+func (m *MetricsRecorder) RecordPublished(topic string) {
+	m.RecordPublishedForBroker(topic, legacyBrokerType)
+}
+
+// RecordPublishedForBroker increments the messages published counter for the
+// given topic and broker type.
+func (m *MetricsRecorder) RecordPublishedForBroker(topic, brokerType string) {
 	m.messagesPublished.WithLabelValues(topic, brokerType, m.component, m.version).Inc()
 }
 
-// RecordError increments the errors counter for the given topic, broker
-// type, and error type.
-func (m *MetricsRecorder) RecordError(topic, brokerType, errorType string) {
+// RecordError preserves the legacy API for callers that do not provide a
+// backend label.
+func (m *MetricsRecorder) RecordError(topic, errorType string) {
+	m.RecordErrorForBroker(topic, legacyBrokerType, errorType)
+}
+
+// RecordErrorForBroker increments the errors counter for the given topic,
+// broker type, and error type.
+func (m *MetricsRecorder) RecordErrorForBroker(topic, brokerType, errorType string) {
 	m.errors.WithLabelValues(topic, brokerType, errorType, m.component, m.version).Inc()
 }
 
-// RecordDuration observes the message processing duration for the given
+// RecordDuration preserves the legacy API for callers that do not provide a
+// backend label.
+func (m *MetricsRecorder) RecordDuration(topic string, duration time.Duration) {
+	m.RecordDurationForBroker(topic, legacyBrokerType, duration)
+}
+
+// RecordDurationForBroker observes message processing duration for the given
 // topic and broker type.
-func (m *MetricsRecorder) RecordDuration(topic, brokerType string, duration time.Duration) {
+func (m *MetricsRecorder) RecordDurationForBroker(topic, brokerType string, duration time.Duration) {
 	m.messageDuration.WithLabelValues(topic, brokerType, m.component, m.version).Observe(duration.Seconds())
 }

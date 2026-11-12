@@ -29,6 +29,8 @@ CREATE TABLE IF NOT EXISTS broker_ranges (
     subscription_id TEXT NOT NULL,
     range_start     BIGINT NOT NULL,
     range_end       BIGINT NOT NULL,
+    delivered       BIGINT NOT NULL DEFAULT 0,
+    owner           TEXT NOT NULL,
     state           TEXT NOT NULL DEFAULT 'pending',
     lease_expires   TIMESTAMPTZ NOT NULL,
     PRIMARY KEY (topic, subscription_id, range_start)

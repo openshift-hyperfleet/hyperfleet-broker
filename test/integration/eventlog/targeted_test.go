@@ -88,8 +88,26 @@ func TestVisibilityOrderingUnderConcurrentPublishers(t *testing.T) {
 	require.NoError(t, sub.Subscribe(context.Background(), topic, handler))
 	time.Sleep(eventLogSetupSleep)
 
+	published, err := publishVisibilityEvents(context.Background(), pub, topic, publishers, perPublisher)
+	require.NoError(t, err)
+
+	waitFor(20*time.Second, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(received) >= total
+	})
+
+	mu.Lock()
+	receivedSnapshot := append([]string(nil), received...)
+	mu.Unlock()
+	assertVisibilityResults(t, receivedSnapshot, published, total)
+}
+
+func publishVisibilityEvents(
+	ctx context.Context, pub broker.Publisher, topic string, publishers, perPublisher int,
+) ([][]string, error) {
 	published := make([][]string, publishers)
-	pubErrs := make(chan error, total)
+	pubErrs := make(chan error, publishers*perPublisher)
 	var wg sync.WaitGroup
 	for p := 0; p < publishers; p++ {
 		wg.Add(1)
@@ -104,7 +122,7 @@ func TestVisibilityOrderingUnderConcurrentPublishers(t *testing.T) {
 					pubErrs <- fmt.Errorf("publisher %d event %d: %w", p, i, err)
 					return
 				}
-				if err := pub.Publish(context.Background(), topic, &evt); err != nil {
+				if err := pub.Publish(ctx, topic, &evt); err != nil {
 					pubErrs <- fmt.Errorf("publisher %d event %d: %w", p, i, err)
 					return
 				}
@@ -114,21 +132,17 @@ func TestVisibilityOrderingUnderConcurrentPublishers(t *testing.T) {
 	}
 	wg.Wait()
 	close(pubErrs)
+	var errs []error
 	for err := range pubErrs {
-		require.NoError(t, err) // asserted on the test goroutine, not the publishers
+		errs = append(errs, err)
 	}
+	return published, errors.Join(errs...)
+}
 
-	waitFor(20*time.Second, func() bool {
-		mu.Lock()
-		defer mu.Unlock()
-		return len(received) >= total
-	})
-
-	mu.Lock()
-	defer mu.Unlock()
+func assertVisibilityResults(t *testing.T, received []string, published [][]string, total int) {
+	t.Helper()
 	require.Len(t, received, total, "every event should be delivered")
 
-	// Exactly once: no losses and no duplicates behind the cursor.
 	counts := make(map[string]int, total)
 	for _, id := range received {
 		counts[id]++
@@ -137,7 +151,6 @@ func TestVisibilityOrderingUnderConcurrentPublishers(t *testing.T) {
 		assert.Equal(t, 1, n, "event %s delivered %d times", id, n)
 	}
 
-	// Per-publisher ordering: each publisher's events arrive in publish order.
 	position := make(map[string]int, total)
 	for i, id := range received {
 		position[id] = i
@@ -578,6 +591,60 @@ func TestMetricsLabeledPerBackend(t *testing.T) {
 		require.True(t, ok, "%s should carry broker_type=\"postgres\"", name)
 		assert.Equal(t, want, value, "%s with broker_type=\"postgres\"", name)
 	}
+}
+
+func TestLostRangeOwnershipStopsProgress(t *testing.T) {
+	configMap := postgresConfigMap(sharedPostgresDSN)
+	configMap["broker.postgres.batch_size"] = "1"
+	topic := fmt.Sprintf("lost-owner-topic-%d", time.Now().UnixNano())
+	subID := fmt.Sprintf("lost-owner-sub-%d", time.Now().UnixNano())
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	sub, err := broker.NewSubscriber(testutil.NewTestLogger(), subID, testutil.NewTestMetrics(t), configMap)
+	require.NoError(t, err)
+	defer func() { _ = sub.Close() }() // best-effort cleanup; the test is ending
+	require.NoError(t, sub.Subscribe(context.Background(), topic, func(ctx context.Context, _ *event.Event) error {
+		close(started)
+		select {
+		case <-release:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}))
+
+	pub, err := broker.NewPublisher(testutil.NewTestLogger(), testutil.NewTestMetrics(t), configMap)
+	require.NoError(t, err)
+	defer func() { _ = pub.Close() }() // best-effort cleanup; the test is ending
+	evt := event.New()
+	evt.SetType("com.example.test.event")
+	evt.SetSource("test-source")
+	evt.SetID("lost-owner-event")
+	require.NoError(t, evt.SetData(event.ApplicationJSON, map[string]string{"id": evt.ID()}))
+	require.NoError(t, pub.Publish(context.Background(), topic, &evt))
+
+	select {
+	case <-started:
+	case <-time.After(10 * time.Second):
+		t.Fatal("handler did not start")
+	}
+
+	pool, err := pgxpool.New(context.Background(), sharedPostgresDSN)
+	require.NoError(t, err)
+	defer pool.Close() // best-effort cleanup; the test is ending
+	_, err = pool.Exec(context.Background(), `
+		UPDATE broker_ranges SET owner = 'stolen-owner'
+		WHERE topic = $1 AND subscription_id = $2`, topic, subID)
+	require.NoError(t, err)
+	close(release)
+
+	time.Sleep(500 * time.Millisecond)
+	var acked int64
+	require.NoError(t, pool.QueryRow(context.Background(), `
+		SELECT acked FROM broker_cursors
+		WHERE topic = $1 AND subscription_id = $2`, topic, subID).Scan(&acked))
+	assert.Zero(t, acked, "a stale worker must not advance the cursor after losing ownership")
 }
 
 // counterWithBackendLabel returns the value of the named counter's

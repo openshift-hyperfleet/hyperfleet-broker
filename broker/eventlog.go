@@ -14,6 +14,8 @@ package broker
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -53,6 +55,8 @@ const (
 	rangeStatePending = "pending"
 	rangeStateDone    = "done"
 )
+
+var errRangeOwnershipLost = errors.New("event range ownership lost")
 
 // postgresConfig holds the postgres backend configuration: discrete
 // connection fields assembled into the DSN in code (following the API's
@@ -342,36 +346,36 @@ func (p *eventLogPublisher) Publish(ctx context.Context, topic string, evt *even
 
 	payload, err := json.Marshal(evt)
 	if err != nil {
-		p.metrics.RecordError(topic, brokerTypePostgres, "conversion")
+		p.metrics.RecordErrorForBroker(topic, brokerTypePostgres, "conversion")
 		return fmt.Errorf("failed to marshal event to JSON: %w", err)
 	}
 
 	tx, err := p.pool.Begin(ctx)
 	if err != nil {
-		p.metrics.RecordError(topic, brokerTypePostgres, "publish")
+		p.metrics.RecordErrorForBroker(topic, brokerTypePostgres, "publish")
 		return fmt.Errorf("failed to begin publish transaction: %w", err)
 	}
 	defer rollbackTx(ctx, tx, p.logger)
 
 	seq, err := allocateEventSequence(ctx, tx, topic)
 	if err != nil {
-		p.metrics.RecordError(topic, brokerTypePostgres, "publish")
+		p.metrics.RecordErrorForBroker(topic, brokerTypePostgres, "publish")
 		return fmt.Errorf("failed to allocate sequence for topic %q: %w", topic, err)
 	}
 
 	if _, err = tx.Exec(ctx,
 		`INSERT INTO broker_events (topic, seq, payload) VALUES ($1, $2, $3)`,
 		topic, seq, payload); err != nil {
-		p.metrics.RecordError(topic, brokerTypePostgres, "publish")
+		p.metrics.RecordErrorForBroker(topic, brokerTypePostgres, "publish")
 		return fmt.Errorf("failed to append event: %w", err)
 	}
 
 	if err = tx.Commit(ctx); err != nil {
-		p.metrics.RecordError(topic, brokerTypePostgres, "publish")
+		p.metrics.RecordErrorForBroker(topic, brokerTypePostgres, "publish")
 		return fmt.Errorf("failed to commit publish transaction: %w", err)
 	}
 
-	p.metrics.RecordPublished(topic, brokerTypePostgres)
+	p.metrics.RecordPublishedForBroker(topic, brokerTypePostgres)
 	p.logger.DebugContext(ctx, "successfully published event", "event_id", evt.ID(), "topic", topic, "seq", seq)
 	return nil
 }
@@ -418,8 +422,18 @@ func (p *eventLogPublisher) Close() error {
 // ---------------------------------------------------------------------------
 
 type eventRange struct {
-	start int64
-	end   int64
+	owner     string
+	start     int64
+	end       int64
+	delivered int64
+}
+
+func newRangeOwner() (string, error) {
+	var token [16]byte
+	if _, err := rand.Read(token[:]); err != nil {
+		return "", fmt.Errorf("generate range owner token: %w", err)
+	}
+	return hex.EncodeToString(token[:]), nil
 }
 
 type eventLogSubscriber struct {
@@ -593,8 +607,16 @@ func (s *eventLogSubscriber) reconcileCursors(ctx context.Context) error {
 		UPDATE broker_cursors c
 		SET acked = GREATEST(c.acked, o.oldest - 1),
 		    reserved = GREATEST(c.reserved, o.oldest - 1)
-		FROM (SELECT topic, MIN(seq) AS oldest FROM broker_events GROUP BY topic) o
-		WHERE c.topic = o.topic
+		FROM broker_cursors c2
+		CROSS JOIN LATERAL (
+			SELECT e.seq AS oldest
+			FROM broker_events e
+			WHERE e.topic = c2.topic
+			ORDER BY e.seq
+			LIMIT 1
+		) o
+		WHERE c.topic = c2.topic
+		  AND c.subscription_id = c2.subscription_id
 		  AND (c.acked < o.oldest - 1 OR c.reserved < o.oldest - 1)`); err != nil {
 		return fmt.Errorf("failed to advance cursors past the retention boundary: %w", err)
 	}
@@ -737,18 +759,23 @@ func (s *eventLogSubscriber) worker(ctx context.Context, topic string) {
 // LOCKED so concurrent workers never take the same range.
 func (s *eventLogSubscriber) reclaimRange(ctx context.Context, topic string) (eventRange, bool, error) {
 	var r eventRange
-	err := s.pool.QueryRow(ctx, `
+	owner, err := newRangeOwner()
+	if err != nil {
+		return r, false, err
+	}
+	err = s.pool.QueryRow(ctx, `
 		UPDATE broker_ranges
-		SET lease_expires = NOW() + make_interval(secs => $3::double precision)
+		SET lease_expires = NOW() + make_interval(secs => $3::double precision), owner = $4
 		WHERE ctid IN (
 			SELECT ctid FROM broker_ranges
-			WHERE topic = $1 AND subscription_id = $2 AND state = $4 AND lease_expires < NOW()
+			WHERE topic = $1 AND subscription_id = $2 AND state = $5 AND lease_expires < NOW()
 			ORDER BY range_start
 			LIMIT 1
 			FOR UPDATE SKIP LOCKED
 		)
-		RETURNING range_start, range_end`,
-		topic, s.subscriptionID, s.cfg.Broker.Postgres.leaseDuration().Seconds(), rangeStatePending).Scan(&r.start, &r.end)
+		RETURNING range_start, range_end, delivered, owner`,
+		topic, s.subscriptionID, s.cfg.Broker.Postgres.leaseDuration().Seconds(), owner, rangeStatePending).
+		Scan(&r.start, &r.end, &r.delivered, &r.owner)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return r, false, nil
 	}
@@ -805,6 +832,11 @@ func (s *eventLogSubscriber) reserveRange(ctx context.Context, topic string) (ev
 
 	r.start = reserved
 	r.end = reserved + s.cfg.Broker.Postgres.batchSize()
+	r.delivered = r.start
+	r.owner, err = newRangeOwner()
+	if err != nil {
+		return r, false, err
+	}
 	if r.end > maxSeq {
 		r.end = maxSeq
 	}
@@ -820,9 +852,10 @@ func (s *eventLogSubscriber) reserveRange(ctx context.Context, topic string) (ev
 	}
 
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO broker_ranges (topic, subscription_id, range_start, range_end, lease_expires)
-		VALUES ($1, $2, $3, $4, NOW() + make_interval(secs => $5::double precision))`,
-		topic, s.subscriptionID, r.start, r.end, s.cfg.Broker.Postgres.leaseDuration().Seconds()); err != nil {
+		INSERT INTO broker_ranges (topic, subscription_id, range_start, range_end, delivered, owner, lease_expires)
+		VALUES ($1, $2, $3, $4, $5, $6, NOW() + make_interval(secs => $7::double precision))`,
+		topic, s.subscriptionID, r.start, r.end, r.delivered, r.owner,
+		s.cfg.Broker.Postgres.leaseDuration().Seconds()); err != nil {
 		return r, false, fmt.Errorf("failed to insert range claim: %w", err)
 	}
 
@@ -838,8 +871,8 @@ func (s *eventLogSubscriber) releaseRange(ctx context.Context, topic string, r e
 	if _, err := s.pool.Exec(ctx, `
 		UPDATE broker_ranges
 		SET lease_expires = NOW() + make_interval(secs => $3::double precision)
-		WHERE topic = $1 AND subscription_id = $2 AND range_start = $4`,
-		topic, s.subscriptionID, s.cfg.Broker.Postgres.retryBackoff().Seconds(), r.start); err != nil {
+		WHERE topic = $1 AND subscription_id = $2 AND range_start = $4 AND owner = $5`,
+		topic, s.subscriptionID, s.cfg.Broker.Postgres.retryBackoff().Seconds(), r.start, r.owner); err != nil {
 		s.logger.ErrorContext(ctx, "failed to release range",
 			"error", err, "topic", topic, "range_start", r.start, "range_end", r.end)
 		// The range remains leased and will be reclaimed after lease expiry.
@@ -856,11 +889,15 @@ func (s *eventLogSubscriber) completeRange(ctx context.Context, topic string, r 
 	}
 	defer rollbackTx(ctx, tx, s.logger)
 
-	if _, err := tx.Exec(ctx, `
+	result, err := tx.Exec(ctx, `
 		UPDATE broker_ranges SET state = $3
-		WHERE topic = $1 AND subscription_id = $2 AND range_start = $4`,
-		topic, s.subscriptionID, rangeStateDone, r.start); err != nil {
+		WHERE topic = $1 AND subscription_id = $2 AND range_start = $4 AND owner = $5`,
+		topic, s.subscriptionID, rangeStateDone, r.start, r.owner)
+	if err != nil {
 		return fmt.Errorf("failed to mark range done: %w", err)
+	}
+	if result.RowsAffected() != 1 {
+		return errRangeOwnershipLost
 	}
 
 	if _, err := tx.Exec(ctx, `
@@ -933,7 +970,7 @@ type eventRow struct {
 // commits while Close() drains, bounded by the shutdown timeout.
 func (s *eventLogSubscriber) processRange(ctx context.Context, topic string, r eventRange) {
 	holes := make(map[int64]time.Time)
-	delivered := r.start
+	delivered := r.delivered
 
 	drainCtx, cancelDrain := context.WithTimeout(context.WithoutCancel(ctx), DefaultShutdownTimeout)
 	defer cancelDrain()
@@ -956,7 +993,9 @@ func (s *eventLogSubscriber) processRange(ctx context.Context, topic string, r e
 		// handling that outlasts lease_duration is not reclaimed
 		// underneath a live worker.
 		if time.Since(lastLeaseRenew) >= s.cfg.Broker.Postgres.leaseDuration()/leaseRenewalDivisor {
-			s.renewRangeLease(ctx, topic, r)
+			if !s.renewRangeLease(ctx, topic, r) {
+				return
+			}
 			lastLeaseRenew = time.Now()
 		}
 
@@ -977,26 +1016,10 @@ func (s *eventLogSubscriber) processRange(ctx context.Context, topic string, r e
 			return
 		}
 
-		for _, row := range rows {
-			if row.seq <= delivered {
-				continue // already delivered in a previous pass
-			}
-			if row.seq > delivered+1 {
-				// A hole below this event: wait it out to preserve order.
-				if _, ok := holes[delivered+1]; !ok {
-					holes[delivered+1] = time.Now()
-				}
-				break
-			}
-			select {
-			case <-ctx.Done():
-				return // let the in-flight handler finish on the drain context
-			default:
-			}
-			if !s.deliverEvent(drainCtx, topic, r, row) {
-				return // range released for retry
-			}
-			delivered = row.seq
+		var continueRange bool
+		delivered, continueRange = s.deliverRangeEvents(ctx, drainCtx, topic, r, rows, delivered, holes)
+		if !continueRange {
+			return
 		}
 
 		if delivered >= r.end {
@@ -1038,16 +1061,50 @@ func (s *eventLogSubscriber) processRange(ctx context.Context, topic string, r e
 	}
 }
 
-func (s *eventLogSubscriber) renewRangeLease(ctx context.Context, topic string, r eventRange) {
-	if _, err := s.pool.Exec(ctx, `
+func (s *eventLogSubscriber) deliverRangeEvents(
+	workerCtx, handlerCtx context.Context,
+	topic string,
+	r eventRange,
+	rows []eventRow,
+	delivered int64,
+	holes map[int64]time.Time,
+) (int64, bool) {
+	for _, row := range rows {
+		if row.seq <= delivered {
+			continue
+		}
+		if row.seq > delivered+1 {
+			if _, ok := holes[delivered+1]; !ok {
+				holes[delivered+1] = time.Now()
+			}
+			break
+		}
+		select {
+		case <-workerCtx.Done():
+			return delivered, false
+		default:
+		}
+		if !s.deliverEvent(handlerCtx, topic, r, row) {
+			return delivered, false
+		}
+		delivered = row.seq
+	}
+	return delivered, true
+}
+
+func (s *eventLogSubscriber) renewRangeLease(ctx context.Context, topic string, r eventRange) bool {
+	result, err := s.pool.Exec(ctx, `
 		UPDATE broker_ranges
 		SET lease_expires = NOW() + make_interval(secs => $3::double precision)
-		WHERE topic = $1 AND subscription_id = $2 AND range_start = $4 AND state = $5`,
-		topic, s.subscriptionID, s.cfg.Broker.Postgres.leaseDuration().Seconds(), r.start, rangeStatePending); err != nil {
+		WHERE topic = $1 AND subscription_id = $2 AND range_start = $4 AND owner = $5 AND state = $6`,
+		topic, s.subscriptionID, s.cfg.Broker.Postgres.leaseDuration().Seconds(), r.start, r.owner, rangeStatePending)
+	if err != nil {
 		s.logger.ErrorContext(ctx, "failed to renew range lease",
 			"error", err, "topic", topic, "range_start", r.start)
 		// A missed renewal is bounded by lease-expiry reclaim.
+		return false
 	}
+	return result.RowsAffected() == 1
 }
 
 func (s *eventLogSubscriber) rangeReconciledPast(ctx context.Context, topic string, r eventRange) bool {
@@ -1068,12 +1125,12 @@ func (s *eventLogSubscriber) rangeReconciledPast(ctx context.Context, topic stri
 // the range was released and processing must stop.
 func (s *eventLogSubscriber) deliverEvent(ctx context.Context, topic string, r eventRange, row eventRow) bool {
 	s.logger.DebugContext(ctx, "received message", "topic", topic, "seq", row.seq)
-	s.metrics.RecordConsumed(topic, brokerTypePostgres)
+	s.metrics.RecordConsumedForBroker(topic, brokerTypePostgres)
 
 	var evt event.Event
 	if err := json.Unmarshal(row.payload, &evt); err != nil {
 		s.logger.ErrorContext(ctx, "failed to convert message to CloudEvent", "error", err)
-		s.metrics.RecordError(topic, brokerTypePostgres, "conversion")
+		s.metrics.RecordErrorForBroker(topic, brokerTypePostgres, "conversion")
 		// A payload that does not decode can never succeed; it takes the
 		// attempt counter to the same skip path.
 		return s.recordFailure(ctx, topic, r, row, fmt.Errorf("failed to unmarshal event from JSON: %w", err))
@@ -1090,13 +1147,63 @@ func (s *eventLogSubscriber) deliverEvent(ctx context.Context, topic string, r e
 	}
 
 	start := time.Now()
-	err := s.callHandler(ctx, handler, &evt)
-	s.metrics.RecordDuration(topic, brokerTypePostgres, time.Since(start))
+	handlerCtx, cancelHandler := context.WithCancel(ctx)
+	renewDone := make(chan struct{})
+	renewLost := make(chan struct{}, 1)
+	go func() {
+		renewInterval := s.cfg.Broker.Postgres.leaseDuration() / leaseRenewalDivisor
+		if renewInterval <= 0 {
+			renewInterval = time.Millisecond
+		}
+		ticker := time.NewTicker(renewInterval)
+		defer ticker.Stop()
+		defer close(renewDone)
+		for {
+			select {
+			case <-handlerCtx.Done():
+				return
+			case <-ticker.C:
+				if !s.renewRangeLease(handlerCtx, topic, r) {
+					select {
+					case renewLost <- struct{}{}:
+					default:
+					}
+					cancelHandler()
+					return
+				}
+			}
+		}
+	}()
+	err := s.callHandler(handlerCtx, handler, &evt)
+	cancelHandler()
+	<-renewDone
+	s.metrics.RecordDurationForBroker(topic, brokerTypePostgres, time.Since(start))
+	select {
+	case <-renewLost:
+		return false
+	default:
+	}
 
 	if err != nil {
 		s.logger.ErrorContext(ctx, "handler failed to process event", "error", err)
-		s.metrics.RecordError(topic, brokerTypePostgres, "handler")
+		s.metrics.RecordErrorForBroker(topic, brokerTypePostgres, "handler")
 		return s.recordFailure(ctx, topic, r, row, err)
+	}
+	result, err := s.pool.Exec(ctx, `
+		UPDATE broker_ranges
+		SET delivered = $5
+		WHERE topic = $1 AND subscription_id = $2 AND range_start = $3 AND state = $4 AND owner = $6`,
+		topic, s.subscriptionID, r.start, rangeStatePending, row.seq, r.owner)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "failed to persist range progress", "error", err,
+			"topic", topic, "range_start", r.start, "seq", row.seq)
+		s.releaseRange(ctx, topic, r)
+		return false
+	}
+	if result.RowsAffected() != 1 {
+		s.logger.WarnContext(ctx, "range ownership lost while persisting progress",
+			"topic", topic, "range_start", r.start, "seq", row.seq)
+		return false
 	}
 
 	s.logger.DebugContext(ctx, "successfully processed event",

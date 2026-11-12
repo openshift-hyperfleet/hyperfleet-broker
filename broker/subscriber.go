@@ -93,13 +93,13 @@ func (s *subscriber) Subscribe(ctx context.Context, topic string, handler Handle
 		s.logger.DebugContext(msgCtx, "received message", "topic", topic)
 
 		// Record message consumed
-		s.metrics.RecordConsumed(topic, s.brokerType)
+		s.metrics.RecordConsumedForBroker(topic, s.brokerType)
 
 		// Convert Watermill message to CloudEvent
 		evt, err := messageToEvent(msg)
 		if err != nil {
 			s.logger.ErrorContext(msgCtx, "failed to convert message to CloudEvent", "error", err)
-			s.metrics.RecordError(topic, s.brokerType, "conversion")
+			s.metrics.RecordErrorForBroker(topic, s.brokerType, "conversion")
 			// If conversion fails, we return error which triggers Nack/Retry
 			// If it's a permanent error (malformed), Retry middleware will give up after MaxRetries
 			// and message will be Nacked (or sent to PoisonQueue if configured, but here just Nacked)
@@ -110,11 +110,11 @@ func (s *subscriber) Subscribe(ctx context.Context, topic string, handler Handle
 		// IMPORTANT: Pass msg.Context() to preserve tracing/metadata
 		start := time.Now()
 		err = handler(msgCtx, evt)
-		s.metrics.RecordDuration(topic, s.brokerType, time.Since(start))
+		s.metrics.RecordDurationForBroker(topic, s.brokerType, time.Since(start))
 
 		if err != nil {
 			s.logger.ErrorContext(msgCtx, "handler failed to process event", "error", err)
-			s.metrics.RecordError(topic, s.brokerType, "handler")
+			s.metrics.RecordErrorForBroker(topic, s.brokerType, "handler")
 		} else {
 			s.logger.DebugContext(msgCtx, "successfully processed event",
 				"event_id", evt.ID(), "topic", topic, "subscription_id", s.subscriptionID)
