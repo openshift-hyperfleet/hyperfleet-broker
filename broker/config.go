@@ -19,6 +19,7 @@ type config struct {
 // brokerConfig holds broker-specific configuration
 type brokerConfig struct {
 	Type         string             `mapstructure:"type"`
+	Postgres     postgresConfig     `mapstructure:"postgres"`
 	RabbitMQ     rabbitMQConfig     `mapstructure:"rabbitmq"`
 	GooglePubSub googlePubSubConfig `mapstructure:"googlepubsub"`
 }
@@ -68,6 +69,7 @@ func loadConfig() (*config, error) {
 	// Set defaults
 	v.SetDefault("log_config", false)
 	v.SetDefault("subscriber.parallelism", DefaultSubscriberParallelism)
+	v.SetDefault("broker.postgres.password", "")
 
 	// Read config file (optional - will use defaults if not found)
 	if err := v.ReadInConfig(); err != nil {
@@ -107,6 +109,7 @@ func buildConfigFromMap(configMap map[string]string) (*config, error) {
 	// Set defaults
 	v.SetDefault("log_config", false)
 	v.SetDefault("subscriber.parallelism", DefaultSubscriberParallelism)
+	v.SetDefault("broker.postgres.password", "")
 
 	// Set values from the map
 	// Viper will handle type conversion from string to int/bool during Unmarshal
@@ -138,6 +141,8 @@ func validateConfig(cfg *config) error {
 		return validateRabbitMQConfig(cfg)
 	case brokerTypeGooglePubSub:
 		return validateGooglePubSubConfig(cfg)
+	case brokerTypePostgres:
+		return validatePostgresConfig(cfg)
 	default:
 		return fmt.Errorf("unsupported broker type: %s", cfg.Broker.Type)
 	}

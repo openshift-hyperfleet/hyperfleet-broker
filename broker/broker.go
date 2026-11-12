@@ -22,6 +22,7 @@ const (
 	DefaultShutdownTimeout       = 30 * time.Second
 	brokerTypeRabbitMQ           = "rabbitmq"
 	brokerTypeGooglePubSub       = "googlepubsub"
+	brokerTypePostgres           = "postgres"
 )
 
 // NewPublisher creates a new publisher with the provided logger, metrics recorder, and optional configuration.
@@ -95,6 +96,8 @@ func NewPublisher(log *slog.Logger, metrics *MetricsRecorder, configMap ...map[s
 		}
 		hc = newGooglePubSubHealthCheck(healthClient, cfg.Broker.GooglePubSub.ProjectID)
 		healthCloser = healthClient
+	case brokerTypePostgres:
+		return newEventLogPublisher(cfg, log, metrics)
 	default:
 		return nil, fmt.Errorf("unsupported broker type: %s", cfg.Broker.Type)
 	}
@@ -167,6 +170,8 @@ func NewSubscriber(
 		if err != nil {
 			return nil, fmt.Errorf("failed to create Google Pub/Sub subscriber: %w", err)
 		}
+	case brokerTypePostgres:
+		return newEventLogSubscriber(cfg, log, subscriptionID, metrics)
 	default:
 		return nil, fmt.Errorf("unsupported broker type: %s", cfg.Broker.Type)
 	}

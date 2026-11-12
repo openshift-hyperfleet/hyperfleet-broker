@@ -1,0 +1,66 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres-example-postgres
+    environment:
+      POSTGRES_USER: broker
+      POSTGRES_PASSWORD: broker
+      POSTGRES_DB: broker
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # The integration suite's schema fixture doubles as the example's
+      # schema source until the event_store migration artifacts exist;
+      # initdb runs these on first start, in name order.
+      - ../../test/integration/testutil/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./init-partitions.sql:/docker-entrypoint-initdb.d/02-partitions.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U broker -d broker"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  publisher:
+    build:
+      context: ../..
+      dockerfile: example/Dockerfile
+    container_name: postgres-example-publisher
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./broker.yaml:/app/broker.yaml:ro
+    command: ["./publisher"]
+    restart: unless-stopped
+
+  subscriber1:
+    build:
+      context: ../..
+      dockerfile: example/Dockerfile
+    container_name: postgres-example-subscriber1
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SUBSCRIBER_INSTANCE_ID: "1"
+    volumes:
+      - ./broker.yaml:/app/broker.yaml:ro
+    command: ["./subscriber"]
+    restart: unless-stopped
+
+  subscriber2:
+    build:
+      context: ../..
+      dockerfile: example/Dockerfile
+    container_name: postgres-example-subscriber2
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SUBSCRIBER_INSTANCE_ID: "2"
+    volumes:
+      - ./broker.yaml:/app/broker.yaml:ro
+    command: ["./subscriber"]
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
