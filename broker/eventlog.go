@@ -1024,7 +1024,8 @@ func (s *eventLogSubscriber) processRange(ctx context.Context, topic string, r e
 		}
 
 		var continueRange bool
-		delivered, continueRange = s.deliverRangeEvents(ctx, drainCtx, topic, r, rows, delivered, holes)
+		delivered, continueRange = s.deliverRangeEvents(
+			ctx, drainCtx, topic, r, rows, delivered, holes, lastLeaseRenew)
 		if !continueRange {
 			return
 		}
@@ -1068,6 +1069,9 @@ func (s *eventLogSubscriber) processRange(ctx context.Context, topic string, r e
 	}
 }
 
+// deliverRangeEvents hands the range's rows to their handler in order.
+// leaseRenewed is when the lease was last extended; each persisted event
+// refreshes it for the next handler call.
 func (s *eventLogSubscriber) deliverRangeEvents(
 	workerCtx, handlerCtx context.Context,
 	topic string,
@@ -1075,6 +1079,7 @@ func (s *eventLogSubscriber) deliverRangeEvents(
 	rows []eventRow,
 	delivered int64,
 	holes map[int64]time.Time,
+	leaseRenewed time.Time,
 ) (int64, bool) {
 	for _, row := range rows {
 		if row.seq <= delivered {
@@ -1091,9 +1096,11 @@ func (s *eventLogSubscriber) deliverRangeEvents(
 			return delivered, false
 		default:
 		}
-		if !s.deliverEvent(handlerCtx, topic, r, row) {
+		if !s.deliverEvent(handlerCtx, topic, r, row, leaseRenewed) {
 			return delivered, false
 		}
+		// The owner-guarded progress write extended the lease.
+		leaseRenewed = time.Now()
 		delivered = row.seq
 	}
 	return delivered, true
@@ -1129,8 +1136,12 @@ func (s *eventLogSubscriber) rangeReconciledPast(ctx context.Context, topic stri
 
 // deliverEvent decodes and handles one event. On failure it either skips
 // the event (attempt cap) or releases the range; it returns false when
-// the range was released and processing must stop.
-func (s *eventLogSubscriber) deliverEvent(ctx context.Context, topic string, r eventRange, row eventRow) bool {
+// the range was released and processing must stop. leaseRenewed is when
+// the lease was last extended, seeding the renewal goroutine's error
+// tolerance.
+func (s *eventLogSubscriber) deliverEvent(
+	ctx context.Context, topic string, r eventRange, row eventRow, leaseRenewed time.Time,
+) bool {
 	s.logger.DebugContext(ctx, "received message", "topic", topic, "seq", row.seq)
 	s.metrics.RecordConsumedForBroker(topic, brokerTypePostgres)
 
@@ -1165,10 +1176,10 @@ func (s *eventLogSubscriber) deliverEvent(ctx context.Context, topic string, r e
 		ticker := time.NewTicker(renewInterval)
 		defer ticker.Stop()
 		defer close(renewDone)
-		// The claim set a fresh lease; a renewal error only endangers
-		// ownership once the lease could have expired since the last
-		// successful renewal.
-		lastRenewed := time.Now()
+		// Seed from the last lease extension (claim, renewal, or progress
+		// write); a renewal error only endangers ownership once the lease
+		// could have expired since then.
+		lastRenewed := leaseRenewed
 		for {
 			select {
 			case <-handlerCtx.Done():

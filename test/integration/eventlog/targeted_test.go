@@ -631,6 +631,9 @@ func TestLostRangeOwnershipStopsProgress(t *testing.T) {
 	secondStarted := make(chan struct{})
 	releaseFirst := make(chan struct{})
 	releaseSecond := make(chan struct{})
+	var releaseFirstOnce, releaseSecondOnce sync.Once
+	closeReleaseFirst := func() { releaseFirstOnce.Do(func() { close(releaseFirst) }) }
+	closeReleaseSecond := func() { releaseSecondOnce.Do(func() { close(releaseSecond) }) }
 	var handlerCalls atomic.Int32
 	handler := func(_ context.Context, _ *event.Event) error {
 		if handlerCalls.Add(1) == 1 {
@@ -645,6 +648,11 @@ func TestLostRangeOwnershipStopsProgress(t *testing.T) {
 	sub, err := broker.NewSubscriber(testutil.NewTestLogger(), subID, testutil.NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() { _ = sub.Close() }() // best-effort cleanup; the test is ending
+	// Deferred releases run before the deferred Close, so a failed
+	// assertion cannot leave a blocked handler stalling Close for the
+	// shutdown timeout.
+	defer closeReleaseFirst()
+	defer closeReleaseSecond()
 	require.NoError(t, sub.Subscribe(context.Background(), topic, handler))
 
 	pub, err := broker.NewPublisher(testutil.NewTestLogger(), testutil.NewTestMetrics(t), configMap)
@@ -673,7 +681,7 @@ func TestLostRangeOwnershipStopsProgress(t *testing.T) {
 		SET owner = 'stolen-owner', lease_expires = NOW() - interval '1 second'
 		WHERE topic = $1 AND subscription_id = $2`, topic, subID)
 	require.NoError(t, err)
-	close(releaseFirst)
+	closeReleaseFirst()
 
 	// The worker reclaims only after the stale attempt returned, so the
 	// redelivery proves the rejected progress write completed.
@@ -690,7 +698,7 @@ func TestLostRangeOwnershipStopsProgress(t *testing.T) {
 	assert.Zero(t, acked, "a stale worker must not advance the cursor after losing ownership")
 
 	// The reclaimed range completes normally once the redelivery finishes.
-	close(releaseSecond)
+	closeReleaseSecond()
 	var ackedAfter int64
 	require.True(t, waitFor(10*time.Second, func() bool {
 		err := pool.QueryRow(context.Background(), `
