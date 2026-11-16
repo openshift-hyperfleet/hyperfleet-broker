@@ -1150,8 +1150,12 @@ func (s *eventLogSubscriber) deliverEvent(
 		s.logger.ErrorContext(ctx, "failed to convert message to CloudEvent", "error", err)
 		s.metrics.RecordErrorForBroker(topic, brokerTypePostgres, "conversion")
 		// A payload that does not decode can never succeed; it takes the
-		// attempt counter to the same skip path.
-		return s.recordFailure(ctx, topic, r, row, fmt.Errorf("failed to unmarshal event from JSON: %w", err))
+		// attempt counter to the same skip path, and the skip persists
+		// progress so a run of them cannot let the lease lapse.
+		if !s.recordFailure(ctx, topic, r, row, fmt.Errorf("failed to unmarshal event from JSON: %w", err)) {
+			return false
+		}
+		return s.persistProgress(ctx, topic, r, row.seq)
 	}
 
 	s.handlersMu.RLock()
@@ -1226,8 +1230,26 @@ func (s *eventLogSubscriber) deliverEvent(
 	if err != nil {
 		s.logger.ErrorContext(ctx, "handler failed to process event", "error", err)
 		s.metrics.RecordErrorForBroker(topic, brokerTypePostgres, "handler")
-		return s.recordFailure(ctx, topic, r, row, err)
+		// At the attempt cap the event is skipped: persist the skip so a
+		// run of skipped events keeps the lease alive.
+		if !s.recordFailure(ctx, topic, r, row, err) {
+			return false
+		}
+		return s.persistProgress(ctx, topic, r, row.seq)
 	}
+	if !s.persistProgress(ctx, topic, r, row.seq) {
+		return false
+	}
+
+	s.logger.DebugContext(ctx, "successfully processed event",
+		"event_id", evt.ID(), "topic", topic, "subscription_id", s.subscriptionID)
+	return true
+}
+
+// persistProgress advances the range's durable delivered mark and extends
+// its lease in the same owner-guarded write; it returns false when the
+// range was released or lost and processing must stop.
+func (s *eventLogSubscriber) persistProgress(ctx context.Context, topic string, r eventRange, seq int64) bool {
 	// Persisting progress also extends the lease: a batch of handler calls
 	// shorter than the renewal interval would otherwise let the lease
 	// lapse mid-range.
@@ -1235,22 +1257,19 @@ func (s *eventLogSubscriber) deliverEvent(
 		UPDATE broker_ranges
 		SET delivered = $5, lease_expires = NOW() + make_interval(secs => $7::double precision)
 		WHERE topic = $1 AND subscription_id = $2 AND range_start = $3 AND state = $4 AND owner = $6`,
-		topic, s.subscriptionID, r.start, rangeStatePending, row.seq, r.owner,
+		topic, s.subscriptionID, r.start, rangeStatePending, seq, r.owner,
 		s.cfg.Broker.Postgres.leaseDuration().Seconds())
 	if err != nil {
 		s.logger.ErrorContext(ctx, "failed to persist range progress", "error", err,
-			"topic", topic, "range_start", r.start, "seq", row.seq)
+			"topic", topic, "range_start", r.start, "seq", seq)
 		s.releaseRange(ctx, topic, r)
 		return false
 	}
 	if result.RowsAffected() != 1 {
 		s.logger.WarnContext(ctx, "range ownership lost while persisting progress",
-			"topic", topic, "range_start", r.start, "seq", row.seq)
+			"topic", topic, "range_start", r.start, "seq", seq)
 		return false
 	}
-
-	s.logger.DebugContext(ctx, "successfully processed event",
-		"event_id", evt.ID(), "topic", topic, "subscription_id", s.subscriptionID)
 	return true
 }
 
