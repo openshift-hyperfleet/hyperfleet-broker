@@ -336,6 +336,19 @@ func testLeakIncreasesWithUsage(t *testing.T, cfg brokerTestConfig) {
 			sub, err := broker.NewSubscriber(testutil.NewTestLogger(), "leak-demo", testutil.NewTestMetrics(t), configMap)
 			require.NoError(t, err)
 
+			// Registered before subscribing so a failed Subscribe still
+			// tears the subscriber down; the explicit close before the
+			// measurement runs it exactly once.
+			var closeOnce sync.Once
+			closeSub := func() {
+				closeOnce.Do(func() {
+					if err := sub.Close(); err != nil {
+						t.Logf("failed to close subscriber: %v", err)
+					}
+				})
+			}
+			t.Cleanup(closeSub)
+
 			ctx := context.Background()
 
 			// Subscribe N times
@@ -346,10 +359,7 @@ func testLeakIncreasesWithUsage(t *testing.T, cfg brokerTestConfig) {
 
 			during := runtime.NumGoroutine()
 
-			// Close
-			if err := sub.Close(); err != nil {
-				t.Logf("failed to close subscriber: %v", err)
-			}
+			closeSub()
 			waitForGC()
 
 			after := runtime.NumGoroutine()

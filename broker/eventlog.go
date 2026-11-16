@@ -978,8 +978,8 @@ func (s *eventLogSubscriber) processRange(ctx context.Context, topic string, r e
 	pollTimer := time.NewTimer(s.cfg.Broker.Postgres.pollInterval())
 	defer pollTimer.Stop()
 
-	// The claim just set a fresh lease; renewal is only needed once the
-	// handling outlasts a third of the lease period.
+	// The claim set a fresh lease and every persisted event extends it;
+	// this renewal covers stretches that persist nothing (holes, polls).
 	lastLeaseRenew := time.Now()
 
 	for {
@@ -993,7 +993,14 @@ func (s *eventLogSubscriber) processRange(ctx context.Context, topic string, r e
 		// handling that outlasts lease_duration is not reclaimed
 		// underneath a live worker.
 		if time.Since(lastLeaseRenew) >= s.cfg.Broker.Postgres.leaseDuration()/leaseRenewalDivisor {
-			if !s.renewRangeLease(ctx, topic, r) {
+			owned, err := s.renewRangeLease(ctx, topic, r)
+			if err != nil && ctx.Err() == nil {
+				s.logger.ErrorContext(ctx, "failed to renew range lease",
+					"error", err, "topic", topic, "range_start", r.start)
+			}
+			// Stop on a failed renewal or a confirmed loss: the doc
+			// contract names lease-expiry reclaim as the recovery path.
+			if err != nil || !owned {
 				return
 			}
 			lastLeaseRenew = time.Now()
@@ -1092,19 +1099,19 @@ func (s *eventLogSubscriber) deliverRangeEvents(
 	return delivered, true
 }
 
-func (s *eventLogSubscriber) renewRangeLease(ctx context.Context, topic string, r eventRange) bool {
+// renewRangeLease extends the range lease. It reports whether this worker
+// still owns the range; an error is a failed renewal attempt, not a
+// confirmed ownership loss.
+func (s *eventLogSubscriber) renewRangeLease(ctx context.Context, topic string, r eventRange) (bool, error) {
 	result, err := s.pool.Exec(ctx, `
 		UPDATE broker_ranges
 		SET lease_expires = NOW() + make_interval(secs => $3::double precision)
 		WHERE topic = $1 AND subscription_id = $2 AND range_start = $4 AND owner = $5 AND state = $6`,
 		topic, s.subscriptionID, s.cfg.Broker.Postgres.leaseDuration().Seconds(), r.start, r.owner, rangeStatePending)
 	if err != nil {
-		s.logger.ErrorContext(ctx, "failed to renew range lease",
-			"error", err, "topic", topic, "range_start", r.start)
-		// A missed renewal is bounded by lease-expiry reclaim.
-		return false
+		return false, fmt.Errorf("renew range lease: %w", err)
 	}
-	return result.RowsAffected() == 1
+	return result.RowsAffected() == 1, nil
 }
 
 func (s *eventLogSubscriber) rangeReconciledPast(ctx context.Context, topic string, r eventRange) bool {
@@ -1158,19 +1165,40 @@ func (s *eventLogSubscriber) deliverEvent(ctx context.Context, topic string, r e
 		ticker := time.NewTicker(renewInterval)
 		defer ticker.Stop()
 		defer close(renewDone)
+		// The claim set a fresh lease; a renewal error only endangers
+		// ownership once the lease could have expired since the last
+		// successful renewal.
+		lastRenewed := time.Now()
 		for {
 			select {
 			case <-handlerCtx.Done():
 				return
 			case <-ticker.C:
-				if !s.renewRangeLease(handlerCtx, topic, r) {
-					select {
-					case renewLost <- struct{}{}:
-					default:
-					}
-					cancelHandler()
-					return
+				owned, err := s.renewRangeLease(handlerCtx, topic, r)
+				if err == nil && owned {
+					lastRenewed = time.Now()
+					continue
 				}
+				if err != nil {
+					if handlerCtx.Err() != nil {
+						// The handler finished; the failed renewal is a
+						// cancellation, not a lost lease.
+						return
+					}
+					s.logger.WarnContext(handlerCtx, "failed to renew range lease",
+						"error", err, "topic", topic, "range_start", r.start)
+					// Tolerate the error only while the lease cannot
+					// have expired by the next attempt.
+					if time.Since(lastRenewed)+renewInterval < s.cfg.Broker.Postgres.leaseDuration() {
+						continue
+					}
+				}
+				select {
+				case renewLost <- struct{}{}:
+				default:
+				}
+				cancelHandler()
+				return
 			}
 		}
 	}()
@@ -1189,11 +1217,15 @@ func (s *eventLogSubscriber) deliverEvent(ctx context.Context, topic string, r e
 		s.metrics.RecordErrorForBroker(topic, brokerTypePostgres, "handler")
 		return s.recordFailure(ctx, topic, r, row, err)
 	}
+	// Persisting progress also extends the lease: a batch of handler calls
+	// shorter than the renewal interval would otherwise let the lease
+	// lapse mid-range.
 	result, err := s.pool.Exec(ctx, `
 		UPDATE broker_ranges
-		SET delivered = $5
+		SET delivered = $5, lease_expires = NOW() + make_interval(secs => $7::double precision)
 		WHERE topic = $1 AND subscription_id = $2 AND range_start = $3 AND state = $4 AND owner = $6`,
-		topic, s.subscriptionID, r.start, rangeStatePending, row.seq, r.owner)
+		topic, s.subscriptionID, r.start, rangeStatePending, row.seq, r.owner,
+		s.cfg.Broker.Postgres.leaseDuration().Seconds())
 	if err != nil {
 		s.logger.ErrorContext(ctx, "failed to persist range progress", "error", err,
 			"topic", topic, "range_start", r.start, "seq", row.seq)

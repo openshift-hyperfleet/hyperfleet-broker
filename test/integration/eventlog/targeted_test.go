@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,6 +20,10 @@ import (
 )
 
 const testInterval = "100ms"
+
+// publishTimeout bounds the concurrent publish phase; it is well above the
+// time 100 events need, so hitting it means the broker or database stalled.
+const publishTimeout = 30 * time.Second
 
 // waitFor polls cond until it holds or the timeout passes, reusing one
 // timer across iterations per the resource-lifecycle standard.
@@ -88,7 +93,9 @@ func TestVisibilityOrderingUnderConcurrentPublishers(t *testing.T) {
 	require.NoError(t, sub.Subscribe(context.Background(), topic, handler))
 	time.Sleep(eventLogSetupSleep)
 
-	published, err := publishVisibilityEvents(context.Background(), pub, topic, publishers, perPublisher)
+	publishCtx, cancelPublish := context.WithTimeout(context.Background(), publishTimeout)
+	defer cancelPublish()
+	published, err := publishVisibilityEvents(publishCtx, pub, topic, publishers, perPublisher)
 	require.NoError(t, err)
 
 	waitFor(20*time.Second, func() bool {
@@ -167,12 +174,14 @@ func assertVisibilityResults(t *testing.T, received []string, published [][]stri
 }
 
 // TestCrashRecoveryRedeliversUnackedRange proves that a range whose holder
-// stops progressing is reclaimed after its lease expires and its events are
-// redelivered without loss. Subscriber A blocks inside its handler (a
-// stand-in for a crashed process: no heartbeat, no ack); subscriber B, on
-// the same subscription ID, must reclaim and deliver everything.
+// stops renewing is reclaimed after its lease expires and its events are
+// redelivered without loss. The crashed holder is modeled by transferring
+// its range to a foreign owner (a crashed process renews nothing, so its
+// lease expires) and closing subscriber A so it cannot reclaim; subscriber
+// B, on the same subscription ID, must reclaim and deliver everything.
 func TestCrashRecoveryRedeliversUnackedRange(t *testing.T) {
 	const numEvents = 5
+	const subID = "crash-sub"
 
 	configMap := postgresConfigMap(sharedPostgresDSN)
 	configMap["broker.postgres.lease_duration"] = "500ms"
@@ -184,7 +193,7 @@ func TestCrashRecoveryRedeliversUnackedRange(t *testing.T) {
 
 	var mu sync.Mutex
 	deliveredByA := make(map[string]int)
-	subA, err := broker.NewSubscriber(testutil.NewTestLogger(), "crash-sub", testutil.NewTestMetrics(t), configMap)
+	subA, err := broker.NewSubscriber(testutil.NewTestLogger(), subID, testutil.NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() { _ = subA.Close() }() // best-effort cleanup; the test is ending
 
@@ -192,13 +201,10 @@ func TestCrashRecoveryRedeliversUnackedRange(t *testing.T) {
 		mu.Lock()
 		deliveredByA[evt.ID()]++
 		mu.Unlock()
-		// Stand-in for a crashed process: hold the event far past the lease.
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-time.After(10 * time.Second):
-			return nil
-		}
+		// Stand-in for a crashed process: hold the event until the lost
+		// range cancels the handler.
+		<-ctx.Done()
+		return ctx.Err()
 	}
 	require.NoError(t, subA.Subscribe(context.Background(), topic, handlerA))
 
@@ -221,9 +227,23 @@ func TestCrashRecoveryRedeliversUnackedRange(t *testing.T) {
 	})
 	require.GreaterOrEqual(t, deliveredCount, 1, "subscriber A should deliver at least one event before blocking")
 
+	// A holds range_start=0 (batch size 1, first reservation). Transfer it
+	// to a foreign owner: A's renewals now fail and its lease expires
+	// naturally, as with a crashed process.
+	pool, err := pgxpool.New(context.Background(), sharedPostgresDSN)
+	require.NoError(t, err)
+	defer pool.Close() // best-effort cleanup; the test is ending
+	_, err = pool.Exec(context.Background(), `
+		UPDATE broker_ranges SET owner = 'crashed-worker'
+		WHERE topic = $1 AND subscription_id = $2 AND range_start = 0`, topic, subID)
+	require.NoError(t, err)
+	// Close A so B is the only reclaim candidate, matching a process that
+	// never returns.
+	require.NoError(t, subA.Close())
+
 	// B joins the same subscription and must reclaim the expired range.
 	deliveredByB := make(map[string]int)
-	subB, err := broker.NewSubscriber(testutil.NewTestLogger(), "crash-sub", testutil.NewTestMetrics(t), configMap)
+	subB, err := broker.NewSubscriber(testutil.NewTestLogger(), subID, testutil.NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() { _ = subB.Close() }() // best-effort cleanup; the test is ending
 	handlerB := func(_ context.Context, evt *event.Event) error {
@@ -593,26 +613,39 @@ func TestMetricsLabeledPerBackend(t *testing.T) {
 	}
 }
 
+// TestLostRangeOwnershipStopsProgress proves a stale worker cannot persist
+// progress for a range it no longer owns. The first handler call succeeds,
+// but its range was stolen first, so the owner-guarded progress write must
+// be rejected; the worker then reclaims the expired range under a fresh
+// owner and the redelivered event completes it legitimately.
 func TestLostRangeOwnershipStopsProgress(t *testing.T) {
 	configMap := postgresConfigMap(sharedPostgresDSN)
 	configMap["broker.postgres.batch_size"] = "1"
+	// The steal must land well inside one renewal interval so the renewal
+	// goroutine cannot detect the loss before the handler returns.
+	configMap["broker.postgres.lease_duration"] = "30s"
 	topic := fmt.Sprintf("lost-owner-topic-%d", time.Now().UnixNano())
 	subID := fmt.Sprintf("lost-owner-sub-%d", time.Now().UnixNano())
 
-	started := make(chan struct{})
-	release := make(chan struct{})
+	firstStarted := make(chan struct{})
+	secondStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	releaseSecond := make(chan struct{})
+	var handlerCalls atomic.Int32
+	handler := func(_ context.Context, _ *event.Event) error {
+		if handlerCalls.Add(1) == 1 {
+			close(firstStarted)
+			<-releaseFirst
+			return nil
+		}
+		close(secondStarted)
+		<-releaseSecond
+		return nil
+	}
 	sub, err := broker.NewSubscriber(testutil.NewTestLogger(), subID, testutil.NewTestMetrics(t), configMap)
 	require.NoError(t, err)
 	defer func() { _ = sub.Close() }() // best-effort cleanup; the test is ending
-	require.NoError(t, sub.Subscribe(context.Background(), topic, func(ctx context.Context, _ *event.Event) error {
-		close(started)
-		select {
-		case <-release:
-			return nil
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}))
+	require.NoError(t, sub.Subscribe(context.Background(), topic, handler))
 
 	pub, err := broker.NewPublisher(testutil.NewTestLogger(), testutil.NewTestMetrics(t), configMap)
 	require.NoError(t, err)
@@ -625,7 +658,7 @@ func TestLostRangeOwnershipStopsProgress(t *testing.T) {
 	require.NoError(t, pub.Publish(context.Background(), topic, &evt))
 
 	select {
-	case <-started:
+	case <-firstStarted:
 	case <-time.After(10 * time.Second):
 		t.Fatal("handler did not start")
 	}
@@ -633,18 +666,38 @@ func TestLostRangeOwnershipStopsProgress(t *testing.T) {
 	pool, err := pgxpool.New(context.Background(), sharedPostgresDSN)
 	require.NoError(t, err)
 	defer pool.Close() // best-effort cleanup; the test is ending
+	// Steal the range and expire its lease: the stale worker's progress
+	// write must be rejected, and the expired range becomes reclaimable.
 	_, err = pool.Exec(context.Background(), `
-		UPDATE broker_ranges SET owner = 'stolen-owner'
+		UPDATE broker_ranges
+		SET owner = 'stolen-owner', lease_expires = NOW() - interval '1 second'
 		WHERE topic = $1 AND subscription_id = $2`, topic, subID)
 	require.NoError(t, err)
-	close(release)
+	close(releaseFirst)
 
-	time.Sleep(500 * time.Millisecond)
+	// The worker reclaims only after the stale attempt returned, so the
+	// redelivery proves the rejected progress write completed.
+	select {
+	case <-secondStarted:
+	case <-time.After(10 * time.Second):
+		t.Fatal("worker did not reclaim the stolen range")
+	}
+
 	var acked int64
 	require.NoError(t, pool.QueryRow(context.Background(), `
 		SELECT acked FROM broker_cursors
 		WHERE topic = $1 AND subscription_id = $2`, topic, subID).Scan(&acked))
 	assert.Zero(t, acked, "a stale worker must not advance the cursor after losing ownership")
+
+	// The reclaimed range completes normally once the redelivery finishes.
+	close(releaseSecond)
+	var ackedAfter int64
+	require.True(t, waitFor(10*time.Second, func() bool {
+		err := pool.QueryRow(context.Background(), `
+			SELECT acked FROM broker_cursors
+			WHERE topic = $1 AND subscription_id = $2`, topic, subID).Scan(&ackedAfter)
+		return err == nil && ackedAfter == 1
+	}), "the reclaimed range should complete after the redelivery")
 }
 
 // counterWithBackendLabel returns the value of the named counter's
