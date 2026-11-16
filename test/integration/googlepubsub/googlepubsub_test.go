@@ -157,6 +157,12 @@ func TestErrorSubscriber(t *testing.T) {
 		BrokerType:     "googlepubsub",
 		SetupSleep:     2 * time.Second,
 		ReceiveTimeout: 50 * time.Second,
+		// Two same-ID subscribers in one process contend over the
+		// receive stream ("pubsub: Receive already in progress"), so a
+		// failing handler's nack loop can starve the working
+		// subscriber; redistribution across replicas needs separate
+		// processes, so only progress is asserted here.
+		MinWorkingMessages: 1,
 	})
 }
 

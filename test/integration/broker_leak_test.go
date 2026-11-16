@@ -168,16 +168,10 @@ func testGoroutineLeak(t *testing.T, cfg brokerTestConfig) {
 		return nil
 	}
 
-	// Call Subscribe() multiple times (simulates real usage)
+	// Publish before subscribing: the Google Pub/Sub subscriber creates
+	// each topic while creating its subscription, and the publisher does
+	// not tolerate losing that race, so the topics must exist first.
 	numSubscriptions := 3
-	t.Logf("🔄 Calling Subscribe() %d times (parallelism=%d)...", numSubscriptions, 2)
-	t.Log("")
-
-	for i := 0; i < numSubscriptions; i++ {
-		err = sub.Subscribe(ctx, fmt.Sprintf("topic-%d", i), handler)
-		require.NoError(t, err)
-	}
-
 	for i := 0; i < numSubscriptions; i++ {
 		evt := event.New()
 		evt.SetType("com.example.test.event")
@@ -188,6 +182,15 @@ func testGoroutineLeak(t *testing.T, cfg brokerTestConfig) {
 		}
 
 		err = pub.Publish(context.Background(), "topic-"+strconv.Itoa(i), &evt)
+		require.NoError(t, err)
+	}
+
+	// Call Subscribe() multiple times (simulates real usage)
+	t.Logf("🔄 Calling Subscribe() %d times (parallelism=%d)...", numSubscriptions, 2)
+	t.Log("")
+
+	for i := 0; i < numSubscriptions; i++ {
+		err = sub.Subscribe(ctx, fmt.Sprintf("topic-%d", i), handler)
 		require.NoError(t, err)
 	}
 

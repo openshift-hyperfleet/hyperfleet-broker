@@ -84,6 +84,10 @@ type BrokerTestConfig struct {
 	ReceiveTimeout  time.Duration
 	// PublishDelay is the delay between publishes; zero means no delay.
 	PublishDelay time.Duration
+	// MinWorkingMessages is the minimum the working subscriber must
+	// process in the error-subscriber scenario; zero defaults to half
+	// the published messages.
+	MinWorkingMessages int
 }
 
 // BuildConfigMap creates a configuration map for testing
@@ -563,8 +567,12 @@ func RunErrorSubscriber(t *testing.T, configMap map[string]string, cfg BrokerTes
 	t.Logf("Error subscriber received (and failed): %d messages", errorCount)
 	t.Logf("Working subscriber received: %d messages", workingCount)
 	// At least some messages should be processed successfully
-	assert.GreaterOrEqual(t, workingCount, int64(numMessages/2),
-		"working subscriber should process at least half the messages")
+	minWorking := numMessages / 2
+	if cfg.MinWorkingMessages > 0 {
+		minWorking = cfg.MinWorkingMessages
+	}
+	assert.GreaterOrEqual(t, workingCount, int64(minWorking),
+		"working subscriber should process the minimum expected messages")
 }
 
 // RunCloseWaitsForInFlightMessages tests that Close() waits for in-flight message processing to complete
