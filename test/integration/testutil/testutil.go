@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"strconv"
 	"sync"
@@ -119,9 +120,13 @@ func BuildPostgresConfigMap(dsn string) map[string]string {
 	if err != nil {
 		panic(fmt.Sprintf("invalid postgres DSN: %v", err))
 	}
-	sslmode := pgCfg.RuntimeParams["sslmode"]
-	if sslmode == "" {
-		sslmode = "disable"
+	// pgx consumes sslmode while parsing (it never appears in
+	// RuntimeParams), so read the requested mode from the URI itself.
+	sslmode := "disable"
+	if u, uriErr := url.Parse(dsn); uriErr == nil {
+		if m := u.Query().Get("sslmode"); m != "" {
+			sslmode = m
+		}
 	}
 	return map[string]string{
 		"broker.type":              brokerTypePostgres,

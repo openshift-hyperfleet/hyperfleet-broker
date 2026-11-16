@@ -23,6 +23,13 @@ var (
 	sharedPgBouncerDSN string
 )
 
+const eventLogSetupSleep = 500 * time.Millisecond
+
+// eventLogRetention protects the fixture's partitions from every test's
+// reaper; only the reconciliation tests rotate partitions, through their
+// own explicit maintenance invocations.
+const eventLogRetention = "720h"
+
 // TestMain starts one Postgres container and one PgBouncer container (in
 // transaction mode, networked to Postgres) for the package, applies the
 // event log schema fixture, and runs the tests.
@@ -143,14 +150,9 @@ func postgresConfigMap(dsn string) map[string]string {
 	configMap["broker.postgres.grace_period"] = "1s"
 	configMap["broker.postgres.max_attempts"] = "50"
 	configMap["broker.postgres.retry_backoff"] = "200ms"
-	// A long retention keeps the fixture's old partition alive across every
-	// reaper in the suite; only the reconciliation test rotates partitions,
-	// through its own explicit maintenance invocation.
-	configMap["broker.postgres.retention"] = "720h"
+	configMap["broker.postgres.retention"] = eventLogRetention
 	return configMap
 }
-
-const eventLogSetupSleep = 500 * time.Millisecond
 
 func postgresScenarioConfig(receiveTimeout time.Duration) testutil.BrokerTestConfig {
 	return testutil.BrokerTestConfig{

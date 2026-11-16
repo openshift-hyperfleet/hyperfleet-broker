@@ -418,7 +418,7 @@ func TestRetryScopePerSubscription(t *testing.T) {
 func TestCursorReconciliationPastRetentionBoundary(t *testing.T) {
 	configMap := postgresConfigMap(sharedPostgresDSN)
 	configMap["broker.postgres.grace_period"] = "10s"
-	configMap["broker.postgres.retention"] = "720h"
+	configMap["broker.postgres.retention"] = eventLogRetention
 	configMap["subscriber.parallelism"] = "1"
 
 	topic := fmt.Sprintf("reconcile-topic-%d", time.Now().UnixNano())
@@ -499,6 +499,96 @@ func TestCursorReconciliationPastRetentionBoundary(t *testing.T) {
 	for _, id := range got {
 		assert.Equal(t, "reconcile-next", id, "only the next published event may be delivered")
 	}
+}
+
+// TestReconciliationInsideRangeDeliversRetainedSuffix proves that when
+// retention reconciliation passes only a prefix of a claimed range, the
+// worker skips the dropped prefix and delivers the retained suffix
+// rather than completing the whole range without delivering it.
+func TestReconciliationInsideRangeDeliversRetainedSuffix(t *testing.T) {
+	configMap := postgresConfigMap(sharedPostgresDSN)
+	configMap["broker.postgres.batch_size"] = "10"
+	configMap["broker.postgres.grace_period"] = "10s"
+	configMap["broker.postgres.retention"] = eventLogRetention
+
+	topic := fmt.Sprintf("reconcile-suffix-topic-%d", time.Now().UnixNano())
+	subID := fmt.Sprintf("reconcile-suffix-sub-%d", time.Now().UnixNano())
+
+	pool, err := pgxpool.New(context.Background(), sharedPostgresDSN)
+	require.NoError(t, err)
+	defer pool.Close() // best-effort cleanup; the test is ending
+
+	// A counter row at one lets the subscriber start at zero; its worker
+	// stays idle (nothing published) while the test stages the range.
+	_, err = pool.Exec(context.Background(), `
+		INSERT INTO broker_topic_seq (topic, next) VALUES ($1, 1)
+		ON CONFLICT DO NOTHING`, topic)
+	require.NoError(t, err)
+
+	received := make(chan string, 8)
+	handler := func(_ context.Context, evt *event.Event) error {
+		received <- evt.ID()
+		return nil
+	}
+
+	// The first subscriber's reaper runs an immediate pass at Subscribe;
+	// let it settle while the topic is empty and its reconciliation is a
+	// no-op, so staging below cannot race it. Its next pass is a full
+	// reaper interval away.
+	sub, err := broker.NewSubscriber(testutil.NewTestLogger(), subID, testutil.NewTestMetrics(t), configMap)
+	require.NoError(t, err)
+	defer func() { _ = sub.Close() }() // best-effort cleanup; the test is ending
+	require.NoError(t, sub.Subscribe(context.Background(), topic, handler))
+	time.Sleep(2 * time.Second)
+
+	// Stage the range: sequences 1-3 never published (the dropped prefix
+	// retention must skip), the retained suffix present, and the counter
+	// released only once the rows are in place so the worker's single
+	// claim spans both.
+	retained := make([]string, 0, 3)
+	for i := 4; i <= 6; i++ {
+		evt := event.New()
+		evt.SetType("com.example.test.event")
+		evt.SetSource("test-source")
+		evt.SetID(fmt.Sprintf("reconcile-suffix-%d", i))
+		payload, marshalErr := evt.MarshalJSON()
+		require.NoError(t, marshalErr)
+		retained = append(retained, evt.ID())
+		_, execErr := pool.Exec(context.Background(), `
+			INSERT INTO broker_events (topic, seq, payload, created_at)
+			VALUES ($1, $2, $3, NOW())`,
+			topic, int64(i), payload)
+		require.NoError(t, execErr)
+	}
+	_, err = pool.Exec(context.Background(), `
+		UPDATE broker_topic_seq SET next = 7 WHERE topic = $1`, topic)
+	require.NoError(t, err)
+
+	// The worker claims the range spanning the absent prefix and the
+	// retained suffix, then stalls on the prefix hole for the grace
+	// period; no reaper pass is due in that window, so the claim is
+	// settled before reconciliation runs.
+	require.True(t, waitFor(5*time.Second, func() bool {
+		var claimed bool
+		return pool.QueryRow(context.Background(), `
+			SELECT EXISTS (
+				SELECT 1 FROM broker_ranges
+				WHERE topic = $1 AND subscription_id = $2 AND state = $3
+			)`, topic, subID, "pending").Scan(&claimed) == nil && claimed
+	}), "the subscriber should claim a range spanning the absent prefix")
+
+	// A second subscriber on the same subscription starts a reaper whose
+	// immediate pass reconciles the cursor into the claimed range.
+	sub2, err := broker.NewSubscriber(testutil.NewTestLogger(), subID, testutil.NewTestMetrics(t), configMap)
+	require.NoError(t, err)
+	defer func() { _ = sub2.Close() }() // best-effort cleanup; the test is ending
+	require.NoError(t, sub2.Subscribe(context.Background(), topic, handler))
+
+	// Reconciliation must deliver the retained suffix well inside what
+	// the hole crawl (three holes at the 10s grace) would take.
+	got := collectUntil(received, 3, 15*time.Second)
+	assert.ElementsMatch(t, retained, got,
+		"the retained suffix should deliver after the dropped prefix is reconciled away")
 }
 
 // TestLeaseRenewedDuringHoleWait proves a live worker's range lease is

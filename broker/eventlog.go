@@ -889,6 +889,18 @@ func (s *eventLogSubscriber) completeRange(ctx context.Context, topic string, r 
 	}
 	defer rollbackTx(ctx, tx, s.logger)
 
+	// Lock the cursor row before the boundary read below: a reservation
+	// committing while that UPDATE waits on this lock stays invisible to
+	// its statement snapshot, which could advance acked past
+	// reserved-but-undelivered events.
+	_, lockErr := tx.Exec(ctx, `
+		SELECT acked FROM broker_cursors
+		WHERE topic = $1 AND subscription_id = $2
+		FOR UPDATE`, topic, s.subscriptionID)
+	if lockErr != nil {
+		return fmt.Errorf("failed to lock subscription cursor: %w", lockErr)
+	}
+
 	result, err := tx.Exec(ctx, `
 		UPDATE broker_ranges SET state = $3
 		WHERE topic = $1 AND subscription_id = $2 AND range_start = $4 AND owner = $5`,
@@ -972,7 +984,21 @@ func (s *eventLogSubscriber) processRange(ctx context.Context, topic string, r e
 	holes := make(map[int64]time.Time)
 	delivered := r.delivered
 
-	drainCtx, cancelDrain := context.WithTimeout(context.WithoutCancel(ctx), DefaultShutdownTimeout)
+	// The drain context outlives worker cancellation so an in-flight
+	// range can commit while Close() drains; its shutdown-timeout
+	// deadline arms only when cancellation begins, so a handler that
+	// legitimately outlasts the timeout is not expired during normal
+	// processing.
+	drainCtx, cancelDrain := context.WithCancel(context.WithoutCancel(ctx))
+	drainArmed := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			time.AfterFunc(DefaultShutdownTimeout, cancelDrain)
+		case <-drainArmed:
+		}
+	}()
+	defer close(drainArmed)
 	defer cancelDrain()
 
 	pollTimer := time.NewTimer(s.cfg.Broker.Postgres.pollInterval())
@@ -1006,14 +1032,21 @@ func (s *eventLogSubscriber) processRange(ctx context.Context, topic string, r e
 			lastLeaseRenew = time.Now()
 		}
 
-		// A range the cursor has reconciled past is done: complete it
-		// rather than crawl through dropped events.
-		if s.rangeReconciledPast(ctx, topic, r) {
-			if err := s.completeRange(drainCtx, topic, r); err != nil && ctx.Err() == nil {
-				s.logger.ErrorContext(ctx, "failed to complete reconciled range",
-					"error", err, "topic", topic, "range_start", r.start, "range_end", r.end)
+		// A range the cursor has fully reconciled past is done: complete
+		// it rather than crawl through dropped events. Reconciliation
+		// can also pass only a prefix of the range: skip the dropped
+		// prefix and deliver the retained suffix.
+		if acked, ok := s.ackedCursor(ctx, topic); ok && acked > r.start {
+			if acked >= r.end {
+				if err := s.completeRange(drainCtx, topic, r); err != nil && ctx.Err() == nil {
+					s.logger.ErrorContext(ctx, "failed to complete reconciled range",
+						"error", err, "topic", topic, "range_start", r.start, "range_end", r.end)
+				}
+				return
 			}
-			return
+			if acked > delivered {
+				delivered = acked
+			}
 		}
 
 		rows, err := s.readEvents(ctx, topic, r)
@@ -1121,7 +1154,9 @@ func (s *eventLogSubscriber) renewRangeLease(ctx context.Context, topic string, 
 	return result.RowsAffected() == 1, nil
 }
 
-func (s *eventLogSubscriber) rangeReconciledPast(ctx context.Context, topic string, r eventRange) bool {
+// ackedCursor reports the subscription's acked position for a topic,
+// and whether the read succeeded.
+func (s *eventLogSubscriber) ackedCursor(ctx context.Context, topic string) (int64, bool) {
 	var acked int64
 	err := s.pool.QueryRow(ctx, `
 		SELECT acked FROM broker_cursors
@@ -1129,9 +1164,9 @@ func (s *eventLogSubscriber) rangeReconciledPast(ctx context.Context, topic stri
 		topic, s.subscriptionID).Scan(&acked)
 	if err != nil {
 		s.logger.ErrorContext(ctx, "failed to read acked cursor", "error", err, "topic", topic)
-		return false
+		return 0, false
 	}
-	return acked > r.start
+	return acked, true
 }
 
 // deliverEvent decodes and handles one event. On failure it either skips
@@ -1149,13 +1184,14 @@ func (s *eventLogSubscriber) deliverEvent(
 	if err := json.Unmarshal(row.payload, &evt); err != nil {
 		s.logger.ErrorContext(ctx, "failed to convert message to CloudEvent", "error", err)
 		s.metrics.RecordErrorForBroker(topic, brokerTypePostgres, "conversion")
-		// A payload that does not decode can never succeed; it takes the
-		// attempt counter to the same skip path, and the skip persists
-		// progress so a run of them cannot let the lease lapse.
-		if !s.recordFailure(ctx, topic, r, row, fmt.Errorf("failed to unmarshal event from JSON: %w", err)) {
-			return false
-		}
-		return s.persistProgress(ctx, topic, r, row.seq)
+		return s.skipEvent(ctx, topic, r, row, fmt.Errorf("failed to unmarshal event from JSON: %w", err))
+	}
+	// The SDK accepts a bare {"specversion":"1.0"} during decoding; an
+	// event missing required attributes can never be handled usefully.
+	if err := evt.Validate(); err != nil {
+		s.logger.ErrorContext(ctx, "event failed CloudEvent validation", "error", err)
+		s.metrics.RecordErrorForBroker(topic, brokerTypePostgres, "conversion")
+		return s.skipEvent(ctx, topic, r, row, fmt.Errorf("event failed CloudEvent validation: %w", err))
 	}
 
 	s.handlersMu.RLock()
@@ -1230,12 +1266,7 @@ func (s *eventLogSubscriber) deliverEvent(
 	if err != nil {
 		s.logger.ErrorContext(ctx, "handler failed to process event", "error", err)
 		s.metrics.RecordErrorForBroker(topic, brokerTypePostgres, "handler")
-		// At the attempt cap the event is skipped: persist the skip so a
-		// run of skipped events keeps the lease alive.
-		if !s.recordFailure(ctx, topic, r, row, err) {
-			return false
-		}
-		return s.persistProgress(ctx, topic, r, row.seq)
+		return s.skipEvent(ctx, topic, r, row, err)
 	}
 	if !s.persistProgress(ctx, topic, r, row.seq) {
 		return false
@@ -1244,6 +1275,20 @@ func (s *eventLogSubscriber) deliverEvent(
 	s.logger.DebugContext(ctx, "successfully processed event",
 		"event_id", evt.ID(), "topic", topic, "subscription_id", s.subscriptionID)
 	return true
+}
+
+// skipEvent routes an undeliverable event through the failure path: the
+// attempt is counted, and at the cap the event is skipped for this
+// subscription with progress persisted, so a run of skips cannot let
+// the lease lapse. It returns false when the range was released and
+// processing must stop.
+func (s *eventLogSubscriber) skipEvent(
+	ctx context.Context, topic string, r eventRange, row eventRow, cause error,
+) bool {
+	if !s.recordFailure(ctx, topic, r, row, cause) {
+		return false
+	}
+	return s.persistProgress(ctx, topic, r, row.seq)
 }
 
 // persistProgress advances the range's durable delivered mark and extends
