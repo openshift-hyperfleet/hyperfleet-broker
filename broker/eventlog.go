@@ -581,12 +581,18 @@ func (s *eventLogSubscriber) retentionReaper(ctx context.Context) {
 	ticker := time.NewTicker(eventLogReaperInterval)
 	defer ticker.Stop()
 	for {
-		if err := s.runMaintenance(ctx); err != nil {
-			s.logger.ErrorContext(ctx, "failed to run event log maintenance", "error", err)
+		// A pass may not outlast its cadence: the maintenance routine
+		// runs DDL that can queue behind a long transaction, so each
+		// pass gets the reaper interval as its deadline and a timed-out
+		// pass logs and retries on the next tick.
+		passCtx, cancelPass := context.WithTimeout(ctx, eventLogReaperInterval)
+		if err := s.runMaintenance(passCtx); err != nil {
+			s.logger.ErrorContext(passCtx, "failed to run event log maintenance", "error", err)
 		}
-		if err := s.reconcileCursors(ctx); err != nil {
-			s.logger.ErrorContext(ctx, "failed to reconcile event log cursors", "error", err)
+		if err := s.reconcileCursors(passCtx); err != nil {
+			s.logger.ErrorContext(passCtx, "failed to reconcile event log cursors", "error", err)
 		}
+		cancelPass()
 		select {
 		case <-ctx.Done():
 			return
@@ -1414,7 +1420,8 @@ func (s *eventLogSubscriber) sendError(ctx context.Context, err *SubscriberError
 
 // Close implements Subscriber. Cancels the workers, waits for in-flight
 // handlers to finish, then releases the pool and closes the error
-// channel.
+// channel. Returns an error when the workers or the retention reaper do
+// not stop within the shutdown timeout.
 func (s *eventLogSubscriber) Close() error {
 	s.closeMu.Lock()
 	if s.closed {
@@ -1441,10 +1448,12 @@ func (s *eventLogSubscriber) Close() error {
 		s.wg.Wait()
 		close(done)
 	}()
+	var closeErr error
 	select {
 	case <-done:
 	case <-time.After(DefaultShutdownTimeout):
 		s.logger.WarnContext(context.Background(), "timed out waiting for event log workers to stop")
+		closeErr = fmt.Errorf("timed out waiting for event log workers to stop")
 	}
 	reaperDone := s.reaperDone
 	s.startMu.Unlock()
@@ -1454,12 +1463,18 @@ func (s *eventLogSubscriber) Close() error {
 		case <-reaperDone:
 		case <-time.After(DefaultShutdownTimeout):
 			s.logger.WarnContext(context.Background(), "timed out waiting for the event log retention reaper to stop")
+			if closeErr == nil {
+				closeErr = fmt.Errorf("timed out waiting for the event log retention reaper to stop")
+			}
 		}
 	}
 
 	s.pool.Close()
 	close(s.errorChan)
 
+	if closeErr != nil {
+		return closeErr
+	}
 	s.logger.InfoContext(context.Background(), "successfully closed subscriber")
 	return nil
 }
