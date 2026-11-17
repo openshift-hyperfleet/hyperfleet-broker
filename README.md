@@ -344,6 +344,8 @@ Behavior settings:
 
 **Schema prerequisite:** the backend issues no DDL itself — the schema and the `broker_maintenance` routine must exist before startup (the schema comes from the `event_store` migration artifacts); partition pre-creation and rotation run through that routine, invoked by the backend's retention reaper.
 
+**Maintenance lifecycle:** the retention reaper runs from subscribers — once immediately at startup, then every minute — and the routine pre-creates tomorrow's partition, so a deployment that publishes must run at least one subscriber; a publisher-only process performs no rotation. Every subscriber replica invokes the routine; its operations are idempotent, and a pass that loses a concurrent creation race retries on the next interval.
+
 **Consumer lag** is observable in one SQL query — the topic's allocated head minus each subscription's acknowledged position:
 
 ```sql

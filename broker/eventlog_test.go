@@ -308,3 +308,20 @@ func TestPostgresConfigMarshalRedactsPassword(t *testing.T) {
 	assert.Contains(t, string(data), "localhost")
 	assert.Contains(t, string(data), "verify-full")
 }
+
+// TestNewEventLogPoolParseErrorOmitsPassword proves a DSN parse failure
+// does not leak the password: pgx's ParseConfigError redaction does not
+// cover escaped-quote passwords.
+func TestNewEventLogPoolParseErrorOmitsPassword(t *testing.T) {
+	cfg, err := buildConfigFromMap(testPostgresConfig(map[string]string{
+		"broker.postgres.password":     "p@ss' le@ked-ta1l",
+		"broker.postgres.ca_cert_file": "/nonexistent/ca.crt",
+	}))
+	require.NoError(t, err)
+
+	_, err = newEventLogPool(cfg)
+	require.Error(t, err, "the missing CA file must fail pool construction")
+	assert.Contains(t, err.Error(), "invalid postgres DSN")
+	assert.NotContains(t, err.Error(), "p@ss", "the error must not leak the password")
+	assert.NotContains(t, err.Error(), "le@ked-ta1l", "the error must not leak the password tail pgx fails to redact")
+}

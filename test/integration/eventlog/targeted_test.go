@@ -381,7 +381,16 @@ func TestRetryScopePerSubscription(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = healthy.Close() }() // best-effort cleanup; the test is ending
 	delivered := make(chan string, 10)
+	// The healthy handler fails once per event before succeeding: with the
+	// POC's shared per-event counter the two subscriptions would burn one
+	// budget together and every event would skip, so receiving all of them
+	// proves the counters are scoped per subscription.
+	var healthyAttempts sync.Map
 	require.NoError(t, healthy.Subscribe(context.Background(), topic, func(_ context.Context, evt *event.Event) error {
+		attempts, _ := healthyAttempts.LoadOrStore(evt.ID(), new(atomic.Int32))
+		if attempts.(*atomic.Int32).Add(1) == 1 {
+			return errors.New("transient failure")
+		}
 		delivered <- evt.ID()
 		return nil
 	}))

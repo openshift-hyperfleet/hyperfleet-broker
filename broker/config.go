@@ -65,6 +65,9 @@ func loadConfig() (*config, error) {
 	// Enable environment variable overrides
 	v.AutomaticEnv()
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	if err := bindPostgresEnv(v); err != nil {
+		return nil, err
+	}
 
 	// Set defaults
 	v.SetDefault("log_config", false)
@@ -117,9 +120,14 @@ func buildConfigFromMap(configMap map[string]string) (*config, error) {
 		v.Set(key, value)
 	}
 
-	// Enable environment variable overrides (they can still override map values)
+	// Enable environment variable overrides; they fill keys the map does
+	// not set, since map values are viper override-layer writes that take
+	// precedence over the environment.
 	v.AutomaticEnv()
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	if err := bindPostgresEnv(v); err != nil {
+		return nil, err
+	}
 
 	var cfg config
 	if err := v.Unmarshal(&cfg); err != nil {
@@ -146,4 +154,31 @@ func validateConfig(cfg *config) error {
 	default:
 		return fmt.Errorf("unsupported broker type: %s", cfg.Broker.Type)
 	}
+}
+
+// postgresEnvKeys are bound explicitly because AutomaticEnv only
+// overrides keys Viper already knows about; without a registered
+// default or config-file entry the broker.postgres block stays
+// invisible to the environment.
+var postgresEnvKeys = []string{
+	"broker.type",
+	"broker.postgres.host", "broker.postgres.port",
+	"broker.postgres.database", "broker.postgres.user",
+	"broker.postgres.password", "broker.postgres.sslmode",
+	"broker.postgres.ca_cert_file", "broker.postgres.pool_max_conns",
+	"broker.postgres.poll_interval", "broker.postgres.fetch_cooldown",
+	"broker.postgres.batch_size", "broker.postgres.grace_period",
+	"broker.postgres.lease_duration", "broker.postgres.max_attempts",
+	"broker.postgres.retry_backoff", "broker.postgres.retention",
+}
+
+// bindPostgresEnv wires the postgres configuration keys to their
+// BROKER_POSTGRES_* environment variables.
+func bindPostgresEnv(v *viper.Viper) error {
+	for _, key := range postgresEnvKeys {
+		if err := v.BindEnv(key); err != nil {
+			return fmt.Errorf("failed to bind %s to its environment variable: %w", key, err)
+		}
+	}
+	return nil
 }

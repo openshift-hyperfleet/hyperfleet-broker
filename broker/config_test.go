@@ -3,6 +3,8 @@ package broker
 import (
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -683,4 +685,53 @@ func TestGooglePubSubConfigValidation(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestPostgresEnvOnlyConfig proves the broker.postgres block can be
+// configured entirely through BROKER_POSTGRES_* environment variables,
+// with no config file or config map registering the keys.
+func TestPostgresEnvOnlyConfig(t *testing.T) {
+	t.Setenv("BROKER_CONFIG_FILE", filepath.Join(t.TempDir(), "absent.yaml"))
+	t.Setenv("BROKER_TYPE", "postgres")
+	t.Setenv("BROKER_POSTGRES_HOST", "localhost")
+	t.Setenv("BROKER_POSTGRES_DATABASE", "event_store")
+	t.Setenv("BROKER_POSTGRES_USER", "event_store_app")
+	t.Setenv("BROKER_POSTGRES_PASSWORD", "secret")
+	t.Setenv("BROKER_POSTGRES_SSLMODE", "verify-full")
+
+	cfg, err := loadConfig()
+	require.NoError(t, err)
+	assert.Equal(t, brokerTypePostgres, cfg.Broker.Type)
+	assert.Equal(t, "localhost", cfg.Broker.Postgres.Host)
+	assert.Equal(t, "event_store", cfg.Broker.Postgres.Database)
+	assert.Equal(t, "event_store_app", cfg.Broker.Postgres.User)
+	assert.Equal(t, "secret", cfg.Broker.Postgres.Password)
+	assert.Equal(t, "verify-full", cfg.Broker.Postgres.SSLMode)
+
+	fromMap, err := buildConfigFromMap(map[string]string{})
+	require.NoError(t, err)
+	assert.Equal(t, brokerTypePostgres, fromMap.Broker.Type)
+	assert.Equal(t, "localhost", fromMap.Broker.Postgres.Host)
+	assert.Equal(t, "verify-full", fromMap.Broker.Postgres.SSLMode)
+}
+
+// TestPostgresEnvKeysMatchConfig proves the explicitly bound environment
+// keys track the postgres configuration struct, so a new option cannot
+// silently miss environment support.
+func TestPostgresEnvKeysMatchConfig(t *testing.T) {
+	want := map[string]bool{"broker.type": true}
+	pcType := reflect.TypeOf(postgresConfig{})
+	for i := 0; i < pcType.NumField(); i++ {
+		tag := pcType.Field(i).Tag.Get("mapstructure")
+		if tag == "" || tag == "-" {
+			continue
+		}
+		want["broker.postgres."+strings.Split(tag, ",")[0]] = true
+	}
+
+	got := make(map[string]bool, len(postgresEnvKeys))
+	for _, key := range postgresEnvKeys {
+		got[key] = true
+	}
+	assert.Equal(t, want, got)
 }

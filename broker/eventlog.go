@@ -284,7 +284,10 @@ func rollbackTx(ctx context.Context, tx pgx.Tx, logger *slog.Logger) {
 func newEventLogPool(cfg *config) (*pgxpool.Pool, error) {
 	poolCfg, err := pgxpool.ParseConfig(cfg.Broker.Postgres.dsn())
 	if err != nil {
-		return nil, fmt.Errorf("invalid postgres DSN: %w", err)
+		// ParseConfigError prints the connection string with a redaction
+		// that does not cover escaped-quote passwords, so the detailed
+		// error must not reach callers or logs.
+		return nil, errors.New("invalid postgres DSN: check the connection fields and CA file configuration")
 	}
 	poolCfg.MaxConns = cfg.Broker.Postgres.poolMaxConns()
 
@@ -471,8 +474,6 @@ func newEventLogSubscriber(
 		parallelism = DefaultSubscriberParallelism
 	}
 
-	workerCtx, workerCancel := context.WithCancel(context.Background())
-
 	return &eventLogSubscriber{
 		pool:           pool,
 		cfg:            cfg,
@@ -482,8 +483,6 @@ func newEventLogSubscriber(
 		metrics:        metrics,
 		handlers:       make(map[string]HandlerFunc),
 		startedTopics:  make(map[string]bool),
-		workerCtx:      workerCtx,
-		workerCancel:   workerCancel,
 		errorChan:      make(chan *SubscriberError, ErrorChannelBufferSize),
 	}, nil
 }
@@ -538,7 +537,7 @@ func (s *eventLogSubscriber) Subscribe(ctx context.Context, topic string, handle
 	s.handlers[topic] = handler
 	s.handlersMu.Unlock()
 
-	if err := s.ensureTopicStarted(topic); err != nil {
+	if err := s.ensureTopicStarted(ctx, topic); err != nil {
 		return err
 	}
 
@@ -546,7 +545,7 @@ func (s *eventLogSubscriber) Subscribe(ctx context.Context, topic string, handle
 	return nil
 }
 
-func (s *eventLogSubscriber) ensureTopicStarted(topic string) error {
+func (s *eventLogSubscriber) ensureTopicStarted(ctx context.Context, topic string) error {
 	s.startMu.Lock()
 	defer s.startMu.Unlock()
 
@@ -555,6 +554,13 @@ func (s *eventLogSubscriber) ensureTopicStarted(topic string) error {
 	s.closeMu.RUnlock()
 	if closed {
 		return fmt.Errorf("subscriber is closed")
+	}
+	if s.workerCtx == nil {
+		// Seeded from the first Subscribe call so worker logs and handler
+		// calls carry the caller's context values; cancellation stays
+		// owned by Close, so a canceled Subscribe context does not stop
+		// the workers it started.
+		s.workerCtx, s.workerCancel = context.WithCancel(context.WithoutCancel(ctx))
 	}
 	if !s.startedTopics[topic] {
 		s.startedTopics[topic] = true
@@ -1021,7 +1027,7 @@ func (s *eventLogSubscriber) processRange(ctx context.Context, topic string, r e
 		if time.Since(lastLeaseRenew) >= s.cfg.Broker.Postgres.leaseDuration()/leaseRenewalDivisor {
 			owned, err := s.renewRangeLease(ctx, topic, r)
 			if err != nil && ctx.Err() == nil {
-				s.logger.ErrorContext(ctx, "failed to renew range lease",
+				s.logger.WarnContext(ctx, "failed to renew range lease",
 					"error", err, "topic", topic, "range_start", r.start)
 			}
 			// Stop on a failed renewal or a confirmed loss: the doc
@@ -1432,7 +1438,9 @@ func (s *eventLogSubscriber) Close() error {
 	// startMu block, so no Subscribe can spawn workers after Close's
 	// Wait returns.
 	s.startMu.Lock()
-	s.workerCancel()
+	if s.workerCancel != nil {
+		s.workerCancel()
+	}
 
 	done := make(chan struct{})
 	go func() {
