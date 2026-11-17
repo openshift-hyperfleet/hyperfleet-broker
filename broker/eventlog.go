@@ -885,9 +885,11 @@ func (s *eventLogSubscriber) releaseRange(ctx context.Context, topic string, r e
 	}
 }
 
-// completeRange marks a range done, deletes its attempts rows, advances
-// the acked cursor to the contiguous done high-water, and deletes done
-// ranges below it.
+// completeRange marks a range done, deletes its attempts rows, and
+// advances the acked cursor to the contiguous done high-water. Done
+// range rows are left in place: the runtime role has no direct DELETE
+// on broker_ranges (ADR-0031), and the maintenance routine removes
+// ranges once they fall entirely below the retention boundary.
 func (s *eventLogSubscriber) completeRange(ctx context.Context, topic string, r eventRange) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -934,14 +936,6 @@ func (s *eventLogSubscriber) completeRange(ctx context.Context, topic string, r 
 		WHERE c.topic = $1 AND c.subscription_id = $2`,
 		topic, s.subscriptionID, rangeStatePending); err != nil {
 		return fmt.Errorf("failed to advance acked cursor: %w", err)
-	}
-
-	if _, err := tx.Exec(ctx, `
-		DELETE FROM broker_ranges
-		WHERE topic = $1 AND subscription_id = $2 AND state = $3
-			AND range_end <= (SELECT acked FROM broker_cursors WHERE topic = $1 AND subscription_id = $2)`,
-		topic, s.subscriptionID, rangeStateDone); err != nil {
-		return fmt.Errorf("failed to delete done ranges: %w", err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {

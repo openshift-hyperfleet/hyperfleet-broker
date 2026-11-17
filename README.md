@@ -340,7 +340,7 @@ Behavior settings:
 - **`broker.postgres.lease_duration`** (default: `30s`): range-claim lifetime for crash recovery
 - **`broker.postgres.max_attempts`** (default: `5`): delivery attempts per (topic, subscription, sequence) before the event is skipped for that subscription
 - **`broker.postgres.retry_backoff`** (default: `200ms`): released-range reclaim delay
-- **`broker.postgres.retention`** (default: `24h`): how long events are kept; older daily partitions are dropped by the maintenance routine
+- **`broker.postgres.retention`** (default: `24h`): how long events are kept; older daily partitions are dropped by the maintenance routine. Partitions are shared by every client of the database, so the shortest configured retention governs drops for all subscriptions — keep the value uniform per database, and treat it as an upper bound on how far a subscription may lag before unreceived events are reconciled away
 
 **Schema prerequisite:** the backend issues no DDL itself — the schema and the `broker_maintenance` routine must exist before startup (the schema comes from the `event_store` migration artifacts); partition pre-creation and rotation run through that routine, invoked by the backend's retention reaper.
 
