@@ -342,7 +342,33 @@ Behavior settings:
 - **`broker.postgres.retry_backoff`** (default: `200ms`): released-range reclaim delay
 - **`broker.postgres.retention`** (default: `24h`): how long events are kept; older daily partitions are dropped by the maintenance routine. Partitions are shared by every client of the database, so the shortest configured retention governs drops for all subscriptions — keep the value uniform per database, and treat it as an upper bound on how far a subscription may lag before unreceived events are reconciled away
 
-**Schema prerequisite:** the backend issues no DDL itself — the schema and the `broker_maintenance` routine must exist before startup (the schema comes from the `event_store` migration artifacts); partition pre-creation and rotation run through that routine, invoked by the backend's retention reaper.
+**Schema prerequisite:** the backend issues no DDL itself. The schema and the `broker_maintenance` routine must exist before startup. The schema comes from the `event_store` migrations (below). The maintenance routine is not part of the migrations yet, so install it separately until it ships as a migration. Partition pre-creation and rotation run through that routine, which the backend's retention reaper invokes.
+
+**Migrations:** the `event_store` schema ships as versioned SQL migrations embedded in `broker/eventstore`. A migration executor applies them with `broker.MigrateEventStore(ctx, logger)`. In HyperFleet, the planned executor is the Sentinel chart's init container; adapter deployments run no migrations.
+
+- `MigrateEventStore` reads configuration the same way as `NewPublisher` and `NewSubscriber`: `broker.yaml`, environment, or a config map. With the runtime's `broker.yaml`, it uses the same host, database, `sslmode`, and CA file.
+- It requires `broker.type: postgres`. Connect as `event_store_migrate`: set `BROKER_POSTGRES_USER` and `BROKER_POSTGRES_PASSWORD` from the migration Secret.
+- It applies pending migrations in one `READ COMMITTED` transaction under a PostgreSQL advisory lock. Concurrent runs serialize, and a rerun changes nothing.
+- It records applied versions in `event_store.broker_schema_migrations`.
+
+`example/cmd/migrate` and `example/postgres/` show the full sequence.
+
+Before the first run the platform admin provisions the database:
+
+```sql
+CREATE ROLE event_store_migrate LOGIN PASSWORD '...';
+CREATE ROLE event_store_app LOGIN PASSWORD '...';
+REVOKE CONNECT, TEMPORARY ON DATABASE event_store FROM PUBLIC;
+GRANT CONNECT ON DATABASE event_store TO event_store_migrate, event_store_app;
+GRANT TEMPORARY ON DATABASE event_store TO event_store_migrate;
+ALTER ROLE event_store_app IN DATABASE event_store SET search_path = event_store;
+-- then either:
+GRANT CREATE ON DATABASE event_store TO event_store_migrate;
+-- or, connected to event_store:
+CREATE SCHEMA event_store AUTHORIZATION event_store_migrate;
+```
+
+Do not grant `CONNECT` to any other role, including any role that `hyperfleet-operator` holds. The migrations grant `event_store_app` schema `USAGE` and `SELECT, INSERT, UPDATE` on the event-log tables, and `DELETE` on `broker_event_attempts` only. `event_store_app` gets no DDL and no `DELETE` on the other tables. No other role gets schema or table access.
 
 **Maintenance lifecycle:** the retention reaper runs from subscribers — once immediately at startup, then every minute — and the routine pre-creates tomorrow's partition, so a deployment that publishes must run at least one subscriber; a publisher-only process performs no rotation. Every subscriber replica invokes the routine; its operations are idempotent, and a pass that loses a concurrent creation race retries on the next interval.
 
@@ -679,7 +705,7 @@ Navigate to the PostgreSQL example directory:
 cd example/postgres
 ```
 
-Start all services (PostgreSQL with the event log schema applied, publisher, and two subscribers):
+Start all services: PostgreSQL with the event_store roles, the `migrate` service that applies the event_store migrations, the `maintenance-routine` service that installs the maintenance routine and creates the first partitions, the publisher, and two subscribers.
 
 ```bash
 docker-compose up -d
@@ -702,8 +728,8 @@ docker-compose logs -f subscriber2
 Observe consumer lag directly in SQL:
 
 ```bash
-docker-compose exec postgres psql -U broker -d broker -c \
-  "SELECT c.topic, c.subscription_id, s.next - 1 - c.acked AS lag FROM broker_cursors c JOIN broker_topic_seq s ON s.topic = c.topic;"
+docker-compose exec postgres psql -U broker -d event_store -c \
+  "SELECT c.topic, c.subscription_id, s.next - 1 - c.acked AS lag FROM event_store.broker_cursors c JOIN event_store.broker_topic_seq s ON s.topic = c.topic;"
 ```
 
 Stop services:
@@ -715,7 +741,7 @@ docker-compose down -v
 **What it demonstrates:**
 - Publisher publishes CloudEvents to `example-topic` at a fixed interval
 - Two subscribers with the same subscription ID reserve disjoint sequence ranges (load balancing)
-- The event log schema (tables, index, and maintenance routine) is applied by the container's init scripts on first start; the backend itself creates no schema
+- The `migrate` service applies the event_store migrations as `event_store_migrate` before the application services start, the way a deployment's init container does; the backend itself creates no schema
 - Consumer lag is observable in one SQL query
 
 </details>

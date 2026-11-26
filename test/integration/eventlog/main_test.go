@@ -14,12 +14,15 @@ import (
 	"github.com/openshift-hyperfleet/hyperfleet-broker/test/integration/testutil"
 )
 
-// sharedPostgresDSN holds the connection string for the shared Postgres
-// container created once in TestMain and reused across all tests.
-// sharedPgBouncerDSN routes the same Postgres through PgBouncer in
+// sharedPostgresDSN is the admin connection to the shared Postgres
+// container created once in TestMain; tests use it to stage and inspect
+// rows. The backend under test connects as event_store_app through
+// sharedAppDSN, on the schema the event_store migrations created.
+// sharedPgBouncerDSN routes the runtime role through PgBouncer in
 // transaction mode.
 var (
 	sharedPostgresDSN  string
+	sharedAppDSN       string
 	sharedPgBouncerDSN string
 )
 
@@ -31,8 +34,8 @@ const eventLogSetupSleep = 500 * time.Millisecond
 const eventLogRetention = "720h"
 
 // TestMain starts one Postgres container and one PgBouncer container (in
-// transaction mode, networked to Postgres) for the package, applies the
-// event log schema fixture, and runs the tests.
+// transaction mode, networked to Postgres) for the package, provisions and
+// migrates event_store, and runs the tests.
 func TestMain(m *testing.M) {
 	testutil.SetupTestEnvironment()
 
@@ -45,21 +48,9 @@ func TestMain(m *testing.M) {
 	}
 	networkName := testNetwork.Name
 
-	req := testcontainers.ContainerRequest{
-		Image:        "postgres:16-alpine",
-		ExposedPorts: []string{"5432/tcp"},
-		Env: map[string]string{
-			"POSTGRES_USER":             "broker",
-			"POSTGRES_PASSWORD":         "broker",
-			"POSTGRES_DB":               "broker",
-			"POSTGRES_HOST_AUTH_METHOD": "trust",
-		},
-		Networks:       []string{networkName},
-		NetworkAliases: map[string][]string{networkName: {"eventlog-pg"}},
-		WaitingFor: wait.ForLog("database system is ready to accept connections").
-			WithOccurrence(2).
-			WithStartupTimeout(60 * time.Second),
-	}
+	req := testutil.PostgresContainerRequest()
+	req.Networks = []string{networkName}
+	req.NetworkAliases = map[string][]string{networkName: {"eventlog-pg"}}
 	container, postgresDSN, err := testutil.StartPostgresContainer(ctx, req)
 	if err != nil {
 		_ = testNetwork.Remove(ctx)
@@ -75,8 +66,8 @@ func TestMain(m *testing.M) {
 			Env: map[string]string{
 				"DB_HOST":     "eventlog-pg",
 				"DB_PORT":     "5432",
-				"DB_USER":     "broker",
-				"DB_PASSWORD": "broker",
+				"DB_USER":     testutil.EventStoreAppRole,
+				"DB_PASSWORD": testutil.EventStoreAppRole,
 				"DB_NAME":     "broker",
 				"POOL_MODE":   "transaction",
 				"AUTH_TYPE":   "trust",
@@ -112,13 +103,15 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
-	sharedPgBouncerDSN = fmt.Sprintf("postgres://broker:broker@%s:%s/broker?sslmode=disable", pbHost, pbPort.Port())
+	sharedPgBouncerDSN = fmt.Sprintf("postgres://%s@%s:%s/broker?sslmode=disable",
+		testutil.EventStoreAppRole, pbHost, pbPort.Port())
 
-	// The backend creates no schema: the suite applies the fixture before
-	// any test runs.
-	if err := testutil.ApplyEventLogSchema(ctx, sharedPostgresDSN); err != nil {
+	// The backend creates no schema: the suite migrates event_store before
+	// any test runs and runs the backend as the runtime role.
+	sharedAppDSN, err = testutil.ProvisionEventStore(ctx, sharedPostgresDSN)
+	if err != nil {
 		cleanupSetupFailure()
-		fmt.Fprintf(os.Stderr, "failed to apply event log schema: %v\n", err)
+		fmt.Fprintf(os.Stderr, "failed to provision event_store: %v\n", err)
 		os.Exit(1)
 	}
 

@@ -10,23 +10,23 @@ import (
 )
 
 func TestPublisherSubscriber(t *testing.T) {
-	testutil.RunPublisherSubscriber(t, postgresConfigMap(sharedPostgresDSN), postgresScenarioConfig(10*time.Second))
+	testutil.RunPublisherSubscriber(t, postgresConfigMap(sharedAppDSN), postgresScenarioConfig(10*time.Second))
 }
 
 func TestMultipleEvents(t *testing.T) {
-	testutil.RunMultipleEvents(t, postgresConfigMap(sharedPostgresDSN), postgresScenarioConfig(10*time.Second))
+	testutil.RunMultipleEvents(t, postgresConfigMap(sharedAppDSN), postgresScenarioConfig(10*time.Second))
 }
 
 func TestSharedSubscription(t *testing.T) {
-	testutil.RunSharedSubscription(t, postgresConfigMap(sharedPostgresDSN), postgresScenarioConfig(20*time.Second))
+	testutil.RunSharedSubscription(t, postgresConfigMap(sharedAppDSN), postgresScenarioConfig(20*time.Second))
 }
 
 func TestFanoutSubscription(t *testing.T) {
-	testutil.RunFanoutSubscription(t, postgresConfigMap(sharedPostgresDSN), postgresScenarioConfig(20*time.Second))
+	testutil.RunFanoutSubscription(t, postgresConfigMap(sharedAppDSN), postgresScenarioConfig(20*time.Second))
 }
 
 func TestSlowSubscriber(t *testing.T) {
-	configMap := postgresConfigMap(sharedPostgresDSN)
+	configMap := postgresConfigMap(sharedAppDSN)
 
 	subscriptionID := fmt.Sprintf("slow-subscription-%d", time.Now().UnixNano())
 	sub1, err := broker.NewSubscriber(testutil.NewTestLogger(), subscriptionID, testutil.NewTestMetrics(t), configMap)
@@ -47,11 +47,11 @@ func TestSlowSubscriber(t *testing.T) {
 }
 
 func TestErrorSubscriber(t *testing.T) {
-	testutil.RunErrorSubscriber(t, postgresConfigMap(sharedPostgresDSN), postgresScenarioConfig(15*time.Second))
+	testutil.RunErrorSubscriber(t, postgresConfigMap(sharedAppDSN), postgresScenarioConfig(15*time.Second))
 }
 
 func TestCloseWaitsForInFlightMessages(t *testing.T) {
-	configMap := postgresConfigMap(sharedPostgresDSN)
+	configMap := postgresConfigMap(sharedAppDSN)
 	// One event per range and enough workers that all published messages
 	// are in flight together, matching the shared scenario's parallelism.
 	configMap["broker.postgres.batch_size"] = "1"
@@ -65,9 +65,9 @@ func TestCloseWaitsForInFlightMessages(t *testing.T) {
 }
 
 func TestPanicHandler(t *testing.T) {
-	testutil.RunPanicHandler(t, postgresConfigMap(sharedPostgresDSN), postgresScenarioConfig(15*time.Second))
+	testutil.RunPanicHandler(t, postgresConfigMap(sharedAppDSN), postgresScenarioConfig(15*time.Second))
 }
 
 func TestErrorChannelNotification(t *testing.T) {
-	testutil.RunErrorChannelNotification(t, postgresConfigMap(sharedPostgresDSN), postgresScenarioConfig(10*time.Second))
+	testutil.RunErrorChannelNotification(t, postgresConfigMap(sharedAppDSN), postgresScenarioConfig(10*time.Second))
 }

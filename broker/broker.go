@@ -37,19 +37,9 @@ func NewPublisher(log *slog.Logger, metrics *MetricsRecorder, configMap ...map[s
 		return nil, fmt.Errorf("metrics is required")
 	}
 
-	var cfg *config
-	var err error
-
-	if len(configMap) > 0 && configMap[0] != nil {
-		cfg, err = buildConfigFromMap(configMap[0])
-		if err != nil {
-			return nil, fmt.Errorf("failed to build config from map: %w", err)
-		}
-	} else {
-		cfg, err = loadConfig()
-		if err != nil {
-			return nil, fmt.Errorf("failed to load config: %w", err)
-		}
+	cfg, err := resolveConfig(configMap...)
+	if err != nil {
+		return nil, err
 	}
 
 	// Create Watermill logger adapter with context.Background().
@@ -130,19 +120,9 @@ func NewSubscriber(
 		return nil, fmt.Errorf("metrics is required")
 	}
 
-	var cfg *config
-	var err error
-
-	if len(configMap) > 0 && configMap[0] != nil {
-		cfg, err = buildConfigFromMap(configMap[0])
-		if err != nil {
-			return nil, fmt.Errorf("failed to build config from map: %w", err)
-		}
-	} else {
-		cfg, err = loadConfig()
-		if err != nil {
-			return nil, fmt.Errorf("failed to load config: %w", err)
-		}
+	cfg, err := resolveConfig(configMap...)
+	if err != nil {
+		return nil, err
 	}
 
 	// Create Watermill logger adapter with context.Background() for subscriber creation.

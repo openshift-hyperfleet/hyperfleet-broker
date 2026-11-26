@@ -14,6 +14,7 @@ RUN go mod download
 # Build binaries
 RUN go build -o bin/publisher ./cmd/publisher
 RUN go build -o bin/subscriber ./cmd/subscriber
+RUN go build -o bin/migrate ./cmd/migrate
 
 # Runtime stage
 FROM alpine:latest

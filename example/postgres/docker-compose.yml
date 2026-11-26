@@ -5,19 +5,60 @@ services:
     environment:
       POSTGRES_USER: broker
       POSTGRES_PASSWORD: broker
-      POSTGRES_DB: broker
+      POSTGRES_DB: event_store
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      # The integration suite's schema fixture doubles as the example's
-      # schema source until the event_store migration artifacts exist;
-      # initdb runs these on first start, in name order.
-      - ../../test/integration/testutil/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
-      - ./init-partitions.sql:/docker-entrypoint-initdb.d/02-partitions.sql:ro
+      # Platform admin steps: roles, database ACL, search_path.
+      # initdb runs them only on an empty volume.
+      - ./init-roles.sql:/docker-entrypoint-initdb.d/01-roles.sql:ro
+    # Check over TCP: during initdb the entrypoint's temporary server
+    # answers on the unix socket only, before migrate can connect.
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U broker -d broker"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U broker -d event_store"]
       interval: 5s
       timeout: 5s
       retries: 10
+
+  # Runs the migrations the way a deployment's init container does: the
+  # same broker.yaml, with the migration credential from the environment.
+  migrate:
+    build:
+      context: ../..
+      dockerfile: example/Dockerfile
+    container_name: postgres-example-migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      BROKER_POSTGRES_USER: event_store_migrate
+      BROKER_POSTGRES_PASSWORD: event_store_migrate
+    volumes:
+      - ./broker.yaml:/app/broker.yaml:ro
+    command: ["./migrate"]
+
+  # TODO(HYPERFLEET-1878): remove this service when the routine ships as a
+  # migration; the app services then depend on migrate.
+  # Installs the maintenance routine, then creates the partitions for today
+  # and tomorrow. The routine is the integration suite's stand-in until
+  # HYPERFLEET-1878 ships it as a migration.
+  maintenance-routine:
+    image: postgres:16-alpine
+    container_name: postgres-example-maintenance-routine
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      PGPASSWORD: event_store_migrate
+    volumes:
+      - ../../test/integration/testutil/maintenance_routine.sql:/sql/maintenance-routine.sql:ro
+    command:
+      - psql
+      - "--host=postgres"
+      - "--username=event_store_migrate"
+      - "--dbname=event_store"
+      - "--set=ON_ERROR_STOP=1"
+      - "--file=/sql/maintenance-routine.sql"
+      - "--command=SELECT event_store.broker_maintenance(86400)"
 
   publisher:
     build:
@@ -25,8 +66,8 @@ services:
       dockerfile: example/Dockerfile
     container_name: postgres-example-publisher
     depends_on:
-      postgres:
-        condition: service_healthy
+      maintenance-routine:
+        condition: service_completed_successfully
     volumes:
       - ./broker.yaml:/app/broker.yaml:ro
     command: ["./publisher"]
@@ -38,8 +79,8 @@ services:
       dockerfile: example/Dockerfile
     container_name: postgres-example-subscriber1
     depends_on:
-      postgres:
-        condition: service_healthy
+      maintenance-routine:
+        condition: service_completed_successfully
     environment:
       SUBSCRIBER_INSTANCE_ID: "1"
     volumes:
@@ -53,8 +94,8 @@ services:
       dockerfile: example/Dockerfile
     container_name: postgres-example-subscriber2
     depends_on:
-      postgres:
-        condition: service_healthy
+      maintenance-routine:
+        condition: service_completed_successfully
     environment:
       SUBSCRIBER_INSTANCE_ID: "2"
     volumes:

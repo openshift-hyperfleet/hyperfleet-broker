@@ -281,13 +281,16 @@ func rollbackTx(ctx context.Context, tx pgx.Tx, logger *slog.Logger) {
 	}
 }
 
+// errInvalidPostgresDSN replaces pgx's ParseConfigError, which prints the
+// connection string with a redaction that does not cover escaped-quote
+// passwords, so the detailed error must not reach callers or logs.
+var errInvalidPostgresDSN = errors.New(
+	"invalid postgres DSN: check the connection fields and CA file configuration")
+
 func newEventLogPool(cfg *config) (*pgxpool.Pool, error) {
 	poolCfg, err := pgxpool.ParseConfig(cfg.Broker.Postgres.dsn())
 	if err != nil {
-		// ParseConfigError prints the connection string with a redaction
-		// that does not cover escaped-quote passwords, so the detailed
-		// error must not reach callers or logs.
-		return nil, errors.New("invalid postgres DSN: check the connection fields and CA file configuration")
+		return nil, errInvalidPostgresDSN
 	}
 	poolCfg.MaxConns = cfg.Broker.Postgres.poolMaxConns()
 

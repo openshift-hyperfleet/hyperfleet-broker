@@ -71,7 +71,7 @@ func TestVisibilityOrderingUnderConcurrentPublishers(t *testing.T) {
 	const publishers, perPublisher = 4, 25
 	total := publishers * perPublisher
 
-	configMap := postgresConfigMap(sharedPostgresDSN)
+	configMap := postgresConfigMap(sharedAppDSN)
 	topic := fmt.Sprintf("visibility-topic-%d", time.Now().UnixNano())
 
 	pub, err := broker.NewPublisher(testutil.NewTestLogger(), testutil.NewTestMetrics(t), configMap)
@@ -183,7 +183,7 @@ func TestCrashRecoveryRedeliversUnackedRange(t *testing.T) {
 	const numEvents = 5
 	const subID = "crash-sub"
 
-	configMap := postgresConfigMap(sharedPostgresDSN)
+	configMap := postgresConfigMap(sharedAppDSN)
 	configMap["broker.postgres.lease_duration"] = "500ms"
 	topic := fmt.Sprintf("crash-topic-%d", time.Now().UnixNano())
 
@@ -280,7 +280,7 @@ func TestCrashRecoveryRedeliversUnackedRange(t *testing.T) {
 func TestHoleResolutionAfterInjectedHole(t *testing.T) {
 	const numEvents = 5
 
-	configMap := postgresConfigMap(sharedPostgresDSN)
+	configMap := postgresConfigMap(sharedAppDSN)
 	configMap["broker.postgres.grace_period"] = "500ms"
 	topic := fmt.Sprintf("hole-topic-%d", time.Now().UnixNano())
 
@@ -351,7 +351,7 @@ func TestTransactionPoolingThroughPgBouncer(t *testing.T) {
 
 func TestDuplicateSubscribeRejected(t *testing.T) {
 	sub, err := broker.NewSubscriber(
-		testutil.NewTestLogger(), "duplicate-sub", testutil.NewTestMetrics(t), postgresConfigMap(sharedPostgresDSN),
+		testutil.NewTestLogger(), "duplicate-sub", testutil.NewTestMetrics(t), postgresConfigMap(sharedAppDSN),
 	)
 	require.NoError(t, err)
 	defer func() { _ = sub.Close() }() // best-effort cleanup; the test is ending
@@ -365,7 +365,7 @@ func TestDuplicateSubscribeRejected(t *testing.T) {
 }
 
 func TestRetryScopePerSubscription(t *testing.T) {
-	configMap := postgresConfigMap(sharedPostgresDSN)
+	configMap := postgresConfigMap(sharedAppDSN)
 	configMap["broker.postgres.max_attempts"] = "2"
 	configMap["broker.postgres.retry_backoff"] = "100ms"
 	topic := fmt.Sprintf("retry-scope-topic-%d", time.Now().UnixNano())
@@ -425,7 +425,7 @@ func TestRetryScopePerSubscription(t *testing.T) {
 // period is tuned long enough that the hole crawl cannot deliver within
 // the test's timeout, so delivery can only come through reconciliation.
 func TestCursorReconciliationPastRetentionBoundary(t *testing.T) {
-	configMap := postgresConfigMap(sharedPostgresDSN)
+	configMap := postgresConfigMap(sharedAppDSN)
 	configMap["broker.postgres.grace_period"] = "10s"
 	configMap["broker.postgres.retention"] = eventLogRetention
 	configMap["subscriber.parallelism"] = "1"
@@ -515,7 +515,7 @@ func TestCursorReconciliationPastRetentionBoundary(t *testing.T) {
 // worker skips the dropped prefix and delivers the retained suffix
 // rather than completing the whole range without delivering it.
 func TestReconciliationInsideRangeDeliversRetainedSuffix(t *testing.T) {
-	configMap := postgresConfigMap(sharedPostgresDSN)
+	configMap := postgresConfigMap(sharedAppDSN)
 	configMap["broker.postgres.batch_size"] = "10"
 	configMap["broker.postgres.grace_period"] = "10s"
 	configMap["broker.postgres.retention"] = eventLogRetention
@@ -606,7 +606,7 @@ func TestReconciliationInsideRangeDeliversRetainedSuffix(t *testing.T) {
 // renewal, the second subscriber would steal the expired range during
 // the wait and deliver the same events again.
 func TestLeaseRenewedDuringHoleWait(t *testing.T) {
-	configMap := postgresConfigMap(sharedPostgresDSN)
+	configMap := postgresConfigMap(sharedAppDSN)
 	configMap["broker.postgres.lease_duration"] = "1s"
 	configMap["broker.postgres.grace_period"] = "2s"
 	configMap["broker.postgres.batch_size"] = "5"
@@ -674,7 +674,7 @@ func TestLeaseRenewedDuringHoleWait(t *testing.T) {
 // TestMetricsLabeledPerBackend proves the shared metrics carry the
 // broker_type label for the postgres backend on a real connection.
 func TestMetricsLabeledPerBackend(t *testing.T) {
-	configMap := postgresConfigMap(sharedPostgresDSN)
+	configMap := postgresConfigMap(sharedAppDSN)
 	topic := fmt.Sprintf("metrics-label-topic-%d", time.Now().UnixNano())
 
 	registry := prometheus.NewRegistry()
@@ -718,7 +718,7 @@ func TestMetricsLabeledPerBackend(t *testing.T) {
 // be rejected; the worker then reclaims the expired range under a fresh
 // owner and the redelivered event completes it legitimately.
 func TestLostRangeOwnershipStopsProgress(t *testing.T) {
-	configMap := postgresConfigMap(sharedPostgresDSN)
+	configMap := postgresConfigMap(sharedAppDSN)
 	configMap["broker.postgres.batch_size"] = "1"
 	// The steal must land well inside one renewal interval so the renewal
 	// goroutine cannot detect the loss before the handler returns.
@@ -834,7 +834,7 @@ func counterWithBackendLabel(registry *prometheus.Registry, name string) (float6
 // attempt counter to the cap, the skip surfaces on the error channel,
 // and the events after the skipped one still deliver.
 func TestSkipAfterMaxAttempts(t *testing.T) {
-	configMap := postgresConfigMap(sharedPostgresDSN)
+	configMap := postgresConfigMap(sharedAppDSN)
 	configMap["broker.postgres.max_attempts"] = "2"
 	configMap["broker.postgres.retry_backoff"] = testInterval
 	topic := fmt.Sprintf("skip-topic-%d", time.Now().UnixNano())
@@ -883,7 +883,7 @@ func TestSkipAfterMaxAttempts(t *testing.T) {
 // a CloudEvent is skipped for the subscription after max_attempts, while
 // the events around it still deliver.
 func TestSkipAfterMaxAttemptsUndecodablePayload(t *testing.T) {
-	configMap := postgresConfigMap(sharedPostgresDSN)
+	configMap := postgresConfigMap(sharedAppDSN)
 	configMap["broker.postgres.max_attempts"] = "2"
 	configMap["broker.postgres.retry_backoff"] = testInterval
 	topic := fmt.Sprintf("skip-payload-topic-%d", time.Now().UnixNano())

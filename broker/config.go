@@ -29,6 +29,23 @@ type subscriberConfig struct {
 	Parallelism int `mapstructure:"parallelism"`
 }
 
+// resolveConfig builds the configuration from configMap when one is given,
+// and otherwise loads it from broker.yaml and the environment.
+func resolveConfig(configMap ...map[string]string) (*config, error) {
+	if len(configMap) > 0 && configMap[0] != nil {
+		cfg, err := buildConfigFromMap(configMap[0])
+		if err != nil {
+			return nil, fmt.Errorf("failed to build config from map: %w", err)
+		}
+		return cfg, nil
+	}
+	cfg, err := loadConfig()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load config: %w", err)
+	}
+	return cfg, nil
+}
+
 // loadConfig reads the configuration from broker.yaml and environment variables
 func loadConfig() (*config, error) {
 	v := viper.New()

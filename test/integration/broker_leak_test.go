@@ -22,6 +22,7 @@ import (
 )
 
 // Shared container URLs created once in TestMain and reused across all tests in this package.
+// sharedPostgresDSN connects as event_store_app to the migrated schema.
 var (
 	sharedRabbitMQURL     string
 	sharedPubSubProjectID string
@@ -107,19 +108,7 @@ func TestMain(m *testing.M) {
 
 	var startErr error
 	var postgresContainer testcontainers.Container
-	postgresRequest := testcontainers.ContainerRequest{
-		Image:        "postgres:16-alpine",
-		ExposedPorts: []string{"5432/tcp"},
-		Env: map[string]string{
-			"POSTGRES_USER":             "broker",
-			"POSTGRES_PASSWORD":         "broker",
-			"POSTGRES_DB":               "broker",
-			"POSTGRES_HOST_AUTH_METHOD": "trust",
-		},
-		WaitingFor: wait.ForLog("database system is ready to accept connections").
-			WithOccurrence(2).
-			WithStartupTimeout(60 * time.Second),
-	}
+	postgresRequest := testutil.PostgresContainerRequest()
 	postgresContainer, sharedPostgresDSN, startErr = testutil.StartPostgresContainer(ctx, postgresRequest)
 	if startErr != nil {
 		_ = rabbitmqContainer.Terminate(ctx) // best-effort cleanup; the process exits below
@@ -128,11 +117,12 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
-	if pgErr := testutil.ApplyEventLogSchema(ctx, sharedPostgresDSN); pgErr != nil {
+	var pgErr error
+	if sharedPostgresDSN, pgErr = testutil.ProvisionEventStore(ctx, sharedPostgresDSN); pgErr != nil {
 		_ = postgresContainer.Terminate(ctx) // best-effort cleanup; the process exits below
 		_ = rabbitmqContainer.Terminate(ctx) // best-effort cleanup; the process exits below
 		_ = pubsubContainer.Terminate(ctx)   // best-effort cleanup; the process exits below
-		fmt.Fprintf(os.Stderr, "failed to apply event log schema: %v\n", pgErr)
+		fmt.Fprintf(os.Stderr, "failed to provision event_store: %v\n", pgErr)
 		os.Exit(1)
 	}
 

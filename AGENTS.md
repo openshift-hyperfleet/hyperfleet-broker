@@ -25,7 +25,8 @@ Go library: unified pub/sub API over RabbitMQ, Google Pub/Sub, and PostgreSQL wi
 | Config structure + validation | `broker/config.go`, `broker/rabbitmq.go`, `broker/googlepubsub.go`, `broker/eventlog.go` |
 | Config fields reference | `example/broker.example.yaml` |
 | Integration test helpers | `test/integration/testutil/testutil.go`, `test/integration/testutil/postgres.go` |
-| Event log schema fixture | `test/integration/testutil/schema.sql` (shared by the eventlog suite and the leak test; production schema comes from the `event_store` migrations) |
+| Event store migrations (production schema + `event_store_app` grants) | `broker/eventstore/migrations/`, applied by `eventstore.Migrate` in `broker/eventstore/migrate.go`; executor entry point `broker.MigrateEventStore` in `broker/eventstore_migrate.go`; migration and role-permission tests in `test/integration/eventstore/` |
+| Event store test provisioning | `test/integration/testutil/eventstore.go` (platform admin steps), `testutil.ProvisionEventStore` in `test/integration/testutil/postgres.go` (eventlog suite and leak test migrate the schema and run the backend as `event_store_app`); `test/integration/testutil/maintenance_routine.sql` is only the maintenance-routine stand-in until HYPERFLEET-1878 |
 | Container setup helpers | `test/integration/rabbitmq/setup.go`, `test/integration/googlepubsub/setup.go` |
 | Leak & perf integration tests | `test/integration/broker_leak_test.go`, `test/integration/broker_perf_test.go` |
 | Examples (separate go.mod) | `example/go.mod`, `example/cmd/publisher/main.go`, `example/cmd/subscriber/main.go` |

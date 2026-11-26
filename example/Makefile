@@ -4,6 +4,7 @@
 build:
 	go build -o bin/publisher ./cmd/publisher
 	go build -o bin/subscriber ./cmd/subscriber
+	go build -o bin/migrate ./cmd/migrate
 
 # RabbitMQ commands
 rabbitmq-up:
